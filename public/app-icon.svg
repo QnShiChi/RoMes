@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="robotGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#86EFAC"/>
+      <stop offset="50%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#15803D"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#0284C7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded plate -->
+  <rect x="6" y="6" width="244" height="244" rx="56" fill="url(#bg)" stroke="#1E293B" stroke-width="4"/>
+
+  <!-- Headphone arch -->
+  <path d="M46 126 A82 66 0 0 1 210 126" fill="none" stroke="#E2E8F0" stroke-width="12" stroke-linecap="round"/>
+  <path d="M46 126 A82 66 0 0 1 210 126" fill="none" stroke="#162A38" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Antenna -->
+  <line x1="128" y1="52" x2="128" y2="30" stroke="#162A38" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="128" cy="28" r="14" fill="#38BDF8" stroke="#162A38" stroke-width="6"/>
+  <circle cx="125" cy="24" r="4.5" fill="#FFFFFF"/>
+
+  <!-- Headphone cups -->
+  <rect x="26" y="102" width="26" height="52" rx="12" fill="url(#cyanGrad)" stroke="#162A38" stroke-width="6"/>
+  <rect x="204" y="102" width="26" height="52" rx="12" fill="url(#cyanGrad)" stroke="#162A38" stroke-width="6"/>
+
+  <!-- Robot Head -->
+  <rect x="46" y="52" width="164" height="150" rx="44" fill="url(#robotGrad)" stroke="#162A38" stroke-width="7"/>
+
+  <!-- Visor screen -->
+  <rect x="64" y="76" width="128" height="84" rx="26" fill="#162A38" stroke="#38BDF8" stroke-width="5"/>
+
+  <!-- Screen shine reflection -->
+  <path d="M78 88 L100 88 L86 110 L74 110 Z" fill="#67E8F9" fill-opacity="0.5"/>
+
+  <!-- Expressive Eyes -->
+  <rect x="84" y="98" width="19" height="32" rx="8" fill="#FFFFFF"/>
+  <rect x="153" y="98" width="19" height="32" rx="8" fill="#FFFFFF"/>
+
+  <!-- Cute Smile -->
+  <path d="M112 126 Q128 142 144 126" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Microphone Boom -->
+  <path d="M210 140 Q204 174 168 174" fill="none" stroke="#162A38" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="164" cy="174" r="8" fill="#38BDF8" stroke="#162A38" stroke-width="4.5"/>
+</svg>
