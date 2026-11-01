@@ -31,17 +31,17 @@
   - `SpeechGenerationInput`: `{ script: string; language?: string; voice?: string; campaignSlug: string; outputDir: string }`
   - `SpeechGenerationOutput`: `{ audioPath: string; durationMs: number; format: "wav" | "mp3" }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   - Create `server/marketing/speech-engine.test.ts` testing input validation, command formatting for AI Studio speech synthesis, and audio file resolution.
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
   - Run `pnpm exec vitest run server/marketing/speech-engine.test.ts` and verify it fails due to missing module.
-- [ ] **Step 3: Implement `server/marketing/speech-engine.ts`**
+- [x] **Step 3: Implement `server/marketing/speech-engine.ts`**
   - Implement browser automation helper for `https://aistudio.google.com/generate-speech?model=gemini-3.8-flash-tts`.
   - Implement fallback to Gemini API if `GEMINI_API_KEY` is present in environment.
   - Implement audio duration probing using `ffprobe` or file headers.
-- [ ] **Step 4: Run test to confirm pass**
+- [x] **Step 4: Run test to confirm pass**
   - Run `pnpm exec vitest run server/marketing/speech-engine.test.ts` and confirm 100% pass.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   - Commit `server/marketing/speech-engine.ts` and its test.
 
 ---
