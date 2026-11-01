@@ -83,17 +83,17 @@
   - `MarketingSceneSpec`: `{ type: "hook" | "product" | "features" | "cta"; title: string; subtitle?: string; imagePath?: string; bulletPoints?: string[]; durationMs: number; subtitles?: string[] }`
   - `TemplateOptions`: `{ ratio: "9:16" | "16:9"; width: number; height: number; fps: number; brandName?: string }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   - Create `server/marketing/video-templates.test.ts` verifying HTML output contains CSS animation keyframes (Ken Burns zoom, kinetic text entry, contrasting subtitle overlay, responsive viewports).
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
   - Run `pnpm exec vitest run server/marketing/video-templates.test.ts`.
-- [ ] **Step 3: Implement `server/marketing/video-templates.ts`**
+- [x] **Step 3: Implement `server/marketing/video-templates.ts`**
   - Implement full HTML/CSS generator with 60fps/30fps CSS timing.
   - Integrate Ken Burns pan/zoom on product images.
   - Implement kinetic typography for hooks and CTAs.
-- [ ] **Step 4: Run test to confirm pass**
+- [x] **Step 4: Run test to confirm pass**
   - Run `pnpm exec vitest run server/marketing/video-templates.test.ts` and verify.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   - Commit video template engine and tests.
 
 ---
