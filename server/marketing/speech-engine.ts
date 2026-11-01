@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
 export interface SpeechGenerationInput {
@@ -27,6 +28,45 @@ export interface SpeechEngineOptions {
 
 export const DEFAULT_SPEECH_MODEL = "gemini-3.8-flash-tts";
 export const DEFAULT_VOICE = "Puck";
+
+export function resolveGeminiApiKey(explicitKey?: string, configHome?: string): string {
+  if (explicitKey?.trim()) return explicitKey.trim();
+  if (process.env.GEMINI_API_KEY?.trim()) return process.env.GEMINI_API_KEY.trim();
+
+  const candidateDirs: string[] = [];
+  if (configHome) candidateDirs.push(configHome);
+  if (process.env.OMB_DATA_DIR) candidateDirs.push(process.env.OMB_DATA_DIR);
+  candidateDirs.push(join(homedir(), ".openmausbot"));
+
+  try {
+    const realHome = userInfo()?.homedir;
+    if (realHome) candidateDirs.push(join(realHome, ".openmausbot"));
+  } catch {
+    // Ignore userInfo failure
+  }
+
+  for (const dir of candidateDirs) {
+    if (!dir) continue;
+    try {
+      const configPath = dir.endsWith("config.json") ? dir : join(dir, "config.json");
+      if (existsSync(configPath)) {
+        const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+          openaiCompat?: { key?: string; url?: string };
+        };
+        if (
+          cfg?.openaiCompat?.key &&
+          (!cfg.openaiCompat.url || cfg.openaiCompat.url.includes("generativelanguage.googleapis.com"))
+        ) {
+          return cfg.openaiCompat.key.trim();
+        }
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  return "";
+}
 
 export function probeAudioDurationMs(filePath: string): number {
   if (!existsSync(filePath)) return 0;
@@ -92,7 +132,6 @@ export function detectAudioFormat(buffer: Buffer): "wav" | "mp3" {
     }
   }
   if (buffer.length >= 3) {
-    // MP3 frame sync (0xFF 0xFB/FA/F3/F2) or ID3 tag (ID3)
     if (
       (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) ||
       (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33)
@@ -109,13 +148,20 @@ async function synthesizeViaGeminiApi(
   voice: string,
   timeoutMs: number,
 ): Promise<Buffer> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_SPEECH_MODEL}:generateSpeech?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_SPEECH_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      text: script,
-      voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+      contents: [{ parts: [{ text: script }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voice || DEFAULT_VOICE },
+          },
+        },
+      },
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -124,12 +170,25 @@ async function synthesizeViaGeminiApi(
     throw new Error(`Gemini Speech API failed HTTP ${response.status}: ${await response.text()}`);
   }
 
-  const data = (await response.json()) as { audioContent?: string };
-  if (!data.audioContent) {
-    throw new Error("No audioContent in Gemini Speech API response");
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          inlineData?: {
+            mimeType?: string;
+            data?: string;
+          };
+        }>;
+      };
+    }>;
+  };
+
+  const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!b64) {
+    throw new Error("No inlineData audio received from Gemini Speech API");
   }
 
-  return Buffer.from(data.audioContent, "base64");
+  return Buffer.from(b64, "base64");
 }
 
 export function createSynthesizedWavBuffer(durationSec = 2): Buffer {
@@ -183,12 +242,13 @@ export async function generateMarketingSpeech(
 
   if (options?.synthesizer) {
     audioBuffer = await options.synthesizer(input);
-  } else if (input.apiKey || process.env.GEMINI_API_KEY) {
-    const key = input.apiKey || process.env.GEMINI_API_KEY || "";
-    audioBuffer = await synthesizeViaGeminiApi(key, script, voice, timeoutMs);
   } else {
-    // Local fallback audio generator (for offline environments without GEMINI_API_KEY)
-    audioBuffer = createSynthesizedWavBuffer(2);
+    const apiKey = resolveGeminiApiKey(input.apiKey);
+    if (apiKey) {
+      audioBuffer = await synthesizeViaGeminiApi(apiKey, script, voice, timeoutMs);
+    } else {
+      audioBuffer = createSynthesizedWavBuffer(2);
+    }
   }
 
   const format = detectAudioFormat(audioBuffer);
@@ -207,3 +267,4 @@ export async function generateMarketingSpeech(
     model: DEFAULT_SPEECH_MODEL,
   };
 }
+

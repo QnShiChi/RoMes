@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   generateMarketingSpeech,
   probeAudioDurationMs,
+  resolveGeminiApiKey,
   type SpeechGenerationInput,
 } from "./speech-engine.ts";
 
@@ -85,5 +86,12 @@ describe("speech-engine", () => {
     const dummy = join(tempDir, "dummy.txt");
     writeFileSync(dummy, "not audio");
     expect(probeAudioDurationMs(dummy)).toBe(0);
+  });
+
+  it("resolves Gemini API key with priority order: explicit -> env -> config", () => {
+    expect(resolveGeminiApiKey("explicit-test-key")).toBe("explicit-test-key");
+    const resolved = resolveGeminiApiKey();
+    // In this environment, config.json has the Google AI Studio key
+    expect(resolved.length).toBeGreaterThan(10);
   });
 });
