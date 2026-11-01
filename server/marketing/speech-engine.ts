@@ -132,6 +132,38 @@ async function synthesizeViaGeminiApi(
   return Buffer.from(data.audioContent, "base64");
 }
 
+export function createSynthesizedWavBuffer(durationSec = 2): Buffer {
+  const sampleRate = 44100;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const numSamples = Math.max(sampleRate, Math.floor(sampleRate * durationSec));
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * numChannels * (bitsPerSample / 8);
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  for (let i = 0; i < numSamples; i++) {
+    const val = Math.floor(Math.sin(2 * Math.PI * 440 * (i / sampleRate)) * 8000);
+    buffer.writeInt16LE(val, 44 + i * 2);
+  }
+
+  return buffer;
+}
+
 export async function generateMarketingSpeech(
   input: SpeechGenerationInput,
   options?: SpeechEngineOptions,
@@ -155,11 +187,8 @@ export async function generateMarketingSpeech(
     const key = input.apiKey || process.env.GEMINI_API_KEY || "";
     audioBuffer = await synthesizeViaGeminiApi(key, script, voice, timeoutMs);
   } else {
-    // Headless browser automation placeholder or local mock generator
-    // In production, agent_browser opens https://aistudio.google.com/generate-speech?model=gemini-3.8-flash-tts
-    audioBuffer = Buffer.from(
-      `RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00`,
-    );
+    // Local fallback audio generator (for offline environments without GEMINI_API_KEY)
+    audioBuffer = createSynthesizedWavBuffer(2);
   }
 
   const format = detectAudioFormat(audioBuffer);

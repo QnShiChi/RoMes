@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   detectImageFormat,
   generateMarketingImages,
+  generateMarketingVideoWorkflow,
   getMarketingDraft,
   markMarketingPublished,
   saveMarketingDraft,
@@ -104,5 +105,34 @@ describe("marketing studio core", () => {
     });
     expect(published.status).toBe("published");
     expect(published.publishedResults?.[0]?.url).toBe("https://facebook.com/posts/123");
+  });
+
+  it("orchestrates video generation workflow producing complete MP4 and audio", async () => {
+    const root = makeTempDir();
+    const result = await generateMarketingVideoWorkflow(root, {
+      campaignSlug: "test-video-flow",
+      script: "RoMes giúp bạn tạo video marketing tự động trong nháy mắt.",
+      scenes: [
+        {
+          type: "hook",
+          title: "Khám phá RoMes Marketing",
+          durationMs: 1000,
+        },
+        {
+          type: "cta",
+          title: "Trải nghiệm miễn phí",
+          durationMs: 1000,
+        },
+      ],
+      ratio: "9:16",
+      bgmTheme: "tech",
+    });
+
+    expect(result.campaignSlug).toBe("test-video-flow");
+    expect(result.ratio).toBe("9:16");
+    expect(result.width).toBe(1080);
+    expect(result.height).toBe(1920);
+    expect(result.bytes).toBeGreaterThan(1000);
+    expect(result.nextStepHint).toContain("agents_attach_file");
   });
 });

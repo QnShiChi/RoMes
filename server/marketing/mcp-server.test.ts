@@ -64,6 +64,7 @@ describe("marketing studio MCP server", () => {
     const listed = await rpc(2, "tools/list", {});
     expect(listed.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "generate_marketing_images",
+      "generate_marketing_video",
       "save_marketing_draft",
       "get_marketing_draft",
       "mark_marketing_published",
@@ -103,5 +104,33 @@ describe("marketing studio MCP server", () => {
       arguments: { campaignSlug: "keychron-q1" },
     });
     expect(JSON.parse(loaded.result.content[0].text).productName).toBe("Keychron Q1 Pro");
+
+    const videoCall = await rpc(6, "tools/call", {
+      name: "generate_marketing_video",
+      arguments: {
+        campaignSlug: "keychron-q1",
+        script: "Trải nghiệm gõ phím tuyệt vời cùng Keychron Q1 Pro.",
+        scenes: [
+          {
+            type: "hook",
+            title: "Đỉnh cao bàn phím cơ",
+            durationMs: 1000,
+          },
+          {
+            type: "cta",
+            title: "Mua ngay hôm nay",
+            durationMs: 1000,
+          },
+        ],
+        ratio: "16:9",
+        bgmTheme: "tech",
+      },
+    });
+    expect(videoCall.result.isError).toBeUndefined();
+    const videoResult = JSON.parse(videoCall.result.content[0].text);
+    expect(videoResult.videoPath).toContain("keychron-q1-video.mp4");
+    expect(videoResult.width).toBe(1920);
+    expect(videoResult.height).toBe(1080);
+    expect(videoResult.ratio).toBe("16:9");
   });
 });

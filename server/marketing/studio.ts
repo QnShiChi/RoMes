@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
+import { generateMarketingSpeech } from "./speech-engine.ts";
+import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
+import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
+
 export interface ImagePromptSpec {
   prompt: string;
   label?: string;
@@ -731,3 +736,87 @@ export async function markMarketingPublished(
   writeFileSync(draftPath, JSON.stringify(updated, null, 2), "utf8");
   return updated;
 }
+
+export interface GenerateMarketingVideoInput {
+  campaignSlug: string;
+  script: string;
+  scenes: MarketingSceneSpec[];
+  ratio?: VideoRatio;
+  bgmTheme?: BgmTheme;
+  voice?: string;
+  brandName?: string;
+}
+
+export interface GenerateMarketingVideoOutput {
+  campaignSlug: string;
+  videoPath: string;
+  mixedAudioPath: string;
+  speechAudioPath: string;
+  width: number;
+  height: number;
+  durationSeconds: number;
+  bytes: number;
+  ratio: VideoRatio;
+  nextStepHint: string;
+}
+
+export async function generateMarketingVideoWorkflow(
+  assetsRoot: string,
+  input: GenerateMarketingVideoInput,
+): Promise<GenerateMarketingVideoOutput> {
+  const campaignSlug = normalizeCampaignSlug(input.campaignSlug);
+  const campaignDir = join(assetsRoot, campaignSlug);
+  mkdirSync(campaignDir, { recursive: true });
+
+  const ratio = input.ratio || "9:16";
+  const bgmTheme = input.bgmTheme || "tech";
+  const brandName = input.brandName || "RoMes AI";
+
+  const speechOutput = await generateMarketingSpeech({
+    script: input.script,
+    campaignSlug,
+    outputDir: campaignDir,
+    voice: input.voice,
+  });
+
+  const mixedAudioPath = join(campaignDir, `${campaignSlug}-audio.mp3`);
+  const mixedAudio = await mixCampaignAudio({
+    voicePath: speechOutput.audioPath,
+    bgmTheme,
+    outputPath: mixedAudioPath,
+  });
+
+  const totalAudioMs = Math.max(mixedAudio.durationMs, speechOutput.durationMs, 1000);
+  const rawSceneDuration = input.scenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0);
+  const scaleFactor = rawSceneDuration > 0 ? totalAudioMs / rawSceneDuration : 1;
+
+  const adjustedScenes = input.scenes.map((s) => ({
+    ...s,
+    durationMs: Math.max(500, Math.round((s.durationMs || 3000) * scaleFactor)),
+  }));
+
+  const videoOutputPath = join(campaignDir, `${campaignSlug}-video.mp4`);
+  const renderOutput: VideoRenderOutput = await renderMarketingVideo({
+    campaignSlug,
+    scenes: adjustedScenes,
+    audioPath: mixedAudio.mixedAudioPath,
+    ratio,
+    outputPath: videoOutputPath,
+    brandName,
+  });
+
+  return {
+    campaignSlug,
+    videoPath: renderOutput.videoPath,
+    mixedAudioPath: mixedAudio.mixedAudioPath,
+    speechAudioPath: speechOutput.audioPath,
+    width: renderOutput.width,
+    height: renderOutput.height,
+    durationSeconds: renderOutput.durationSeconds,
+    bytes: renderOutput.bytes,
+    ratio,
+    nextStepHint:
+      'Video rendering complete! Call agents_attach_file with {"path": videoPath} to preview the video in chat, then present the copy and draft for user review before publishing.',
+  };
+}
+

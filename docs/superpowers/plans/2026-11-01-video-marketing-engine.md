@@ -109,16 +109,16 @@
   - `VideoRenderSpec`: `{ campaignSlug: string; scenes: MarketingSceneSpec[]; audioPath: string; ratio: "9:16" | "16:9"; outputPath: string; fps?: number }`
   - `VideoRenderOutput`: `{ videoPath: string; width: number; height: number; durationSeconds: number; bytes: number }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   - Create `server/marketing/video-compiler.test.ts` testing scene compilation, FFmpeg encoding parameter building, and file output resolution.
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
   - Run `pnpm exec vitest run server/marketing/video-compiler.test.ts`.
-- [ ] **Step 3: Implement `server/marketing/video-compiler.ts`**
+- [x] **Step 3: Implement `server/marketing/video-compiler.ts`**
   - Spawn Chrome headless to capture time-stepped animation frames.
   - Invoke `ffmpeg -framerate {fps} -i ... -i audio -c:v libx264 -pix_fmt yuv420p ... output.mp4`.
-- [ ] **Step 4: Run test to confirm pass**
+- [x] **Step 4: Run test to confirm pass**
   - Run `pnpm exec vitest run server/marketing/video-compiler.test.ts`.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   - Commit video compiler and tests.
 
 ---
@@ -136,15 +136,15 @@
   - Input: `{ campaignSlug: string; ratio: "9:16" | "16:9"; script: string; scenes: MarketingSceneSpec[]; bgmTheme?: string }`
   - Output: `{ videoPath: string; durationSeconds: number; ratio: string; previewUrl: string }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   - Update `server/marketing/mcp-server.test.ts` to expect `generate_marketing_video` in tools list and test its invocation.
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
   - Run `pnpm exec vitest run server/marketing/mcp-server.test.ts`.
-- [ ] **Step 3: Integrate into `studio.ts` and `mcp-server.ts`**
+- [x] **Step 3: Integrate into `studio.ts` and `mcp-server.ts`**
   - Connect `speech-engine`, `audio-mixer`, `video-templates`, and `video-compiler` to `server/marketing/studio.ts`.
   - Register `generate_marketing_video` tool in `server/marketing/mcp-server.ts`.
   - Update RoMes Chief of Staff prompt to orchestrate Poppy (script), Finch (Nano Banana 2 Lite images), and Momo (AI Studio Speech & BGM) in parallel before compiling.
-- [ ] **Step 4: Run all tests & verify**
+- [x] **Step 4: Run all tests & verify**
   - Run full vitest suite across marketing studio and verify 100% pass.
-- [ ] **Step 5: Commit & Push**
+- [x] **Step 5: Commit & Push**
   - Commit all files and push cleanly to GitHub repository.

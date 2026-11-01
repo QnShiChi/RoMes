@@ -8,7 +8,7 @@ import {
   getDimensionsForRatio,
   type MarketingSceneSpec,
   type VideoRatio,
-} from "./video-templates";
+} from "./video-templates.ts";
 
 export interface VideoRenderSpec {
   campaignSlug: string;

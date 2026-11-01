@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { probeAudioDurationMs } from "./speech-engine";
+import { probeAudioDurationMs } from "./speech-engine.ts";
 
 export type BgmTheme = "tech" | "upbeat" | "chill" | "luxury";
 

@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
   generateMarketingImages,
+  generateMarketingVideoWorkflow,
   getMarketingDraft,
   markMarketingPublished,
   saveMarketingDraft,
+  type GenerateMarketingVideoInput,
   type ImagePromptSpec,
   type MarketingPostDraft,
   type PublishedPlatformResult,
@@ -55,6 +57,61 @@ const TOOLS = [
         },
       },
       required: ["campaignSlug", "prompts"],
+    },
+  },
+  {
+    name: "generate_marketing_video",
+    description:
+      "Generate a high-converting HTML-based marketing video (9:16 portrait or 16:9 landscape) powered by Google AI Studio Speech, royalty-free BGM with audio ducking, Ken Burns photo zoom, and kinetic animated scenes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignSlug: {
+          type: "string",
+          description: "Short slug for the campaign (e.g. 'keychron-q1-launch').",
+        },
+        script: {
+          type: "string",
+          description: "Full voiceover narration script for Google AI Studio Speech synthesis.",
+        },
+        scenes: {
+          type: "array",
+          description: "List of animated scenes (hook, product, features, cta).",
+          items: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: ["hook", "product", "features", "cta"],
+                description: "Scene type.",
+              },
+              title: { type: "string", description: "Main headline for this scene." },
+              subtitle: { type: "string", description: "Supporting subtitle." },
+              imagePath: { type: "string", description: "Local path to product image." },
+              bulletPoints: { type: "array", items: { type: "string" } },
+              durationMs: { type: "number", description: "Duration in ms (e.g. 3000)." },
+              subtitles: { type: "array", items: { type: "string" } },
+            },
+            required: ["type", "title"],
+          },
+        },
+        ratio: {
+          type: "string",
+          enum: ["9:16", "16:9"],
+          description: "Video aspect ratio (default '9:16' for Reels/Shorts/TikTok).",
+        },
+        bgmTheme: {
+          type: "string",
+          enum: ["tech", "upbeat", "chill", "luxury"],
+          description: "BGM music vibe.",
+        },
+        voice: {
+          type: "string",
+          description: "Google AI Studio voice name (e.g. 'Puck', 'Charon', 'Aoede').",
+        },
+        brandName: { type: "string", description: "Brand name watermark/badge." },
+      },
+      required: ["campaignSlug", "script", "scenes"],
     },
   },
   {
@@ -148,6 +205,21 @@ async function handleCall(name: string, args: Record<string, unknown>) {
             null,
             2,
           ),
+        },
+      ],
+    };
+  }
+
+  if (name === "generate_marketing_video") {
+    const output = await generateMarketingVideoWorkflow(
+      ASSETS_ROOT,
+      args as unknown as GenerateMarketingVideoInput,
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(output, null, 2),
         },
       ],
     };
