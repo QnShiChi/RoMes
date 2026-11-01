@@ -58,16 +58,16 @@
   - `AudioMixInput`: `{ voicePath: string; bgmTheme?: "tech" | "upbeat" | "chill" | "luxury"; customBgmPath?: string; outputPath: string }`
   - `AudioMixOutput`: `{ mixedAudioPath: string; durationMs: number }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   - Create `server/marketing/audio-mixer.test.ts` testing BGM selection, FFmpeg filter_complex ducking command builder (`volume=0.15` during voiceover, `volume=0.85` in silence).
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
   - Run `pnpm exec vitest run server/marketing/audio-mixer.test.ts` and verify it fails.
-- [ ] **Step 3: Implement `server/marketing/audio-mixer.ts`**
+- [x] **Step 3: Implement `server/marketing/audio-mixer.ts`**
   - Implement theme-based BGM resolver.
   - Implement FFmpeg ducking pipeline using `amix`, `sidechaincompress`, or volume filters.
-- [ ] **Step 4: Run test to confirm pass**
+- [x] **Step 4: Run test to confirm pass**
   - Run `pnpm exec vitest run server/marketing/audio-mixer.test.ts` and confirm pass.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   - Commit audio mixer implementation and tests.
 
 ---
