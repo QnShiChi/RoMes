@@ -6,7 +6,7 @@ import {
   getDimensionsForRatio,
   type MarketingSceneSpec,
   type TemplateOptions,
-} from "./video-templates";
+} from "./video-templates.ts";
 
 describe("video-templates", () => {
   it("computes standard resolutions for aspect ratios", () => {

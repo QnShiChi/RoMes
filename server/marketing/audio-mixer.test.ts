@@ -8,7 +8,7 @@ import {
   mixCampaignAudio,
   resolveBgmPath,
   type AudioMixInput,
-} from "./audio-mixer";
+} from "./audio-mixer.ts";
 
 describe("audio-mixer", () => {
   let tempDir: string;
@@ -61,7 +61,7 @@ describe("audio-mixer", () => {
         outputPath: outputFile,
       },
       {
-        runner: async ({ outputPath }) => {
+        runner: async ({ outputPath }: { outputPath: string }) => {
           writeFileSync(outputPath, Buffer.from("mock-mixed-audio-output"));
           return { durationMs: 2500 };
         },

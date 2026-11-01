@@ -7,7 +7,7 @@ import {
   generateMarketingSpeech,
   probeAudioDurationMs,
   type SpeechGenerationInput,
-} from "./speech-engine";
+} from "./speech-engine.ts";
 
 describe("speech-engine", () => {
   let tempDir: string;

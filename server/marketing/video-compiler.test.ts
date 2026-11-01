@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { MarketingSceneSpec } from "./video-templates";
+import type { MarketingSceneSpec } from "./video-templates.ts";
 import {
   renderMarketingVideo,
   type VideoRenderSpec,
-} from "./video-compiler";
+} from "./video-compiler.ts";
 
 describe("video-compiler", () => {
   let tempDir: string;
