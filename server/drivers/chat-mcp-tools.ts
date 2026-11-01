@@ -412,6 +412,13 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         }
       }
     }
+    const counts = new Map<string, number>();
+    for (const tool of registered.values()) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+    for (const tool of Array.from(registered.values())) {
+      if (counts.get(tool.name) === 1 && !registered.has(tool.name)) {
+        registered.set(tool.name, tool);
+      }
+    }
     if (signal.aborted || closed) throw aborted();
   } catch (error) { await close(); throw error; }
   const target = (tool: { name: string; searched: boolean }, args: unknown) => tool.searched ? directoryCallTarget(tool.name, args) : tool.name;
