@@ -32,6 +32,7 @@ export const DEFAULT_VOICE = "Puck";
 export function resolveGeminiApiKey(explicitKey?: string, configHome?: string): string {
   if (explicitKey?.trim()) return explicitKey.trim();
   if (process.env.GEMINI_API_KEY?.trim()) return process.env.GEMINI_API_KEY.trim();
+  if (process.env.GOOGLE_API_KEY?.trim()) return process.env.GOOGLE_API_KEY.trim();
 
   const candidateDirs: string[] = [];
   if (configHome) candidateDirs.push(configHome);
@@ -52,7 +53,11 @@ export function resolveGeminiApiKey(explicitKey?: string, configHome?: string): 
       if (existsSync(configPath)) {
         const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
           openaiCompat?: { key?: string; url?: string };
+          geminiApiKey?: string;
+          googleApiKey?: string;
         };
+        if (cfg?.geminiApiKey?.trim()) return cfg.geminiApiKey.trim();
+        if (cfg?.googleApiKey?.trim()) return cfg.googleApiKey.trim();
         if (
           cfg?.openaiCompat?.key &&
           (!cfg.openaiCompat.url || cfg.openaiCompat.url.includes("generativelanguage.googleapis.com"))
