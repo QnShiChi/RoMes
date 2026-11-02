@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSubtitleWords } from "./remotion/KineticCaptions.tsx";
+import { parseSubtitleWords } from "./remotion/subtitles.ts";
 
 describe("remotion-components", () => {
   it("parses subtitle sentences into timed word tokens", () => {
