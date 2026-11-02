@@ -94,4 +94,17 @@ describe("speech-engine", () => {
     // In this environment, config.json has the Google AI Studio key
     expect(resolved.length).toBeGreaterThan(10);
   });
+
+  it("falls back to Google TTS when Gemini API fails", async () => {
+    const result = await generateMarketingSpeech({
+      script: "Kiểm tra tính năng tự động chuyển đổi sang giọng đọc dự phòng.",
+      campaignSlug: "fallback-campaign",
+      outputDir: tempDir,
+      apiKey: "invalid-key-to-trigger-fallback",
+    });
+
+    expect(existsSync(result.audioPath)).toBe(true);
+    expect(result.durationMs).toBeGreaterThan(0);
+    expect(result.model).toBe("google-tts");
+  });
 });

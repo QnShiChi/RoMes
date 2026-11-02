@@ -126,6 +126,17 @@ export async function renderMarketingVideo(
         { timeout: 15_000, stdio: "pipe" },
       );
 
+      const totalFrames = Math.max(24, Math.round(durationSec * fps));
+      const fadeDuration = Math.min(0.3, durationSec / 4);
+      const fadeOutStart = Math.max(0.1, durationSec - fadeDuration);
+
+      const vfFilter = [
+        `zoompan=z='min(zoom+0.0012,1.15)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${width}x${height}:fps=${fps}`,
+        `fade=t=in:st=0:d=${fadeDuration}`,
+        `fade=t=out:st=${fadeOutStart}:d=${fadeDuration}`,
+        "format=yuv420p",
+      ].join(",");
+
       execFileSync(
         ffmpegBin,
         [
@@ -137,9 +148,11 @@ export async function renderMarketingVideo(
           "-t",
           durationSec.toString(),
           "-vf",
-          `scale=${width}:${height},format=yuv420p`,
+          vfFilter,
           "-c:v",
           "libx264",
+          "-preset",
+          "veryfast",
           "-r",
           fps.toString(),
           mp4Path,

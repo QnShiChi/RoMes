@@ -196,6 +196,46 @@ async function synthesizeViaGeminiApi(
   return Buffer.from(b64, "base64");
 }
 
+export async function synthesizeViaGoogleTts(
+  script: string,
+  language = "vi",
+): Promise<Buffer> {
+  const parts = script
+    .split(/(?<=[.!?,\n;:])\s+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (part.length <= 150) {
+      chunks.push(part);
+    } else {
+      const words = part.split(/\s+/);
+      let curr = "";
+      for (const w of words) {
+        if ((curr + " " + w).length > 150) {
+          if (curr) chunks.push(curr);
+          curr = w;
+        } else {
+          curr = curr ? `${curr} ${w}` : w;
+        }
+      }
+      if (curr) chunks.push(curr);
+    }
+  }
+
+  const audioBuffers: Buffer[] = [];
+  for (const c of chunks) {
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${language}&client=tw-ob`;
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) {
+      throw new Error(`Google TTS failed HTTP ${res.status}`);
+    }
+    audioBuffers.push(Buffer.from(await res.arrayBuffer()));
+  }
+  return Buffer.concat(audioBuffers);
+}
+
 export function createSynthesizedWavBuffer(durationSec = 2): Buffer {
   const sampleRate = 44100;
   const numChannels = 1;
@@ -244,15 +284,36 @@ export async function generateMarketingSpeech(
   const voice = input.voice?.trim() || DEFAULT_VOICE;
   const timeoutMs = input.timeoutMs ?? 60_000;
   let audioBuffer: Buffer;
+  let audioModel = DEFAULT_SPEECH_MODEL;
 
   if (options?.synthesizer) {
     audioBuffer = await options.synthesizer(input);
   } else {
     const apiKey = resolveGeminiApiKey(input.apiKey);
+    let synthesized = false;
+
     if (apiKey) {
-      audioBuffer = await synthesizeViaGeminiApi(apiKey, script, voice, timeoutMs);
-    } else {
-      audioBuffer = createSynthesizedWavBuffer(2);
+      try {
+        audioBuffer = await synthesizeViaGeminiApi(apiKey, script, voice, timeoutMs);
+        synthesized = true;
+      } catch {
+        // Fall back to Google TTS on quota or API error
+      }
+    }
+
+    if (!synthesized) {
+      try {
+        audioBuffer = await synthesizeViaGoogleTts(script, input.language || "vi");
+        audioModel = "google-tts";
+        synthesized = true;
+      } catch {
+        // Fall back to synthesized wave
+      }
+    }
+
+    if (!synthesized) {
+      audioBuffer = createSynthesizedWavBuffer(Math.max(2, Math.ceil(script.length / 15)));
+      audioModel = "sine-fallback";
     }
   }
 
@@ -269,7 +330,7 @@ export async function generateMarketingSpeech(
     durationMs,
     format,
     bytes: audioBuffer.byteLength,
-    model: DEFAULT_SPEECH_MODEL,
+    model: audioModel,
   };
 }
 

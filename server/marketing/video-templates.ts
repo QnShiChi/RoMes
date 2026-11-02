@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+
 export type VideoRatio = "9:16" | "16:9";
 
 export type MarketingSceneType = "hook" | "product" | "features" | "cta";
@@ -37,6 +39,24 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
+export function resolveImageSource(imagePath?: string): string {
+  if (!imagePath) return "";
+  if (imagePath.startsWith("data:") || imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+    return imagePath;
+  }
+  try {
+    if (existsSync(imagePath)) {
+      const ext = imagePath.toLowerCase().split(".").pop();
+      const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      const b64 = readFileSync(imagePath).toString("base64");
+      return `data:${mime};base64,${b64}`;
+    }
+  } catch {
+    // Ignore file read error and return path
+  }
+  return imagePath;
+}
+
 export function buildMarketingSceneHtml(
   scene: MarketingSceneSpec,
   options: TemplateOptions,
@@ -61,9 +81,11 @@ export function buildMarketingSceneHtml(
     }
 
     case "product": {
+      const imgSrc = resolveImageSource(scene.imagePath);
       const imgTag = scene.imagePath
         ? `<div class="image-wrapper ken-burns">
-            <img src="${escapeHtml(scene.imagePath)}" alt="${title}" />
+            <img src="${escapeHtml(imgSrc)}" alt="${title}" />
+            <div class="image-overlay"></div>
           </div>`
         : "";
       sceneBody = `
@@ -173,7 +195,7 @@ export function buildMarketingVideoHtml(
       width: ${width}px;
       height: ${height}px;
       overflow: hidden;
-      background: #090a0f;
+      background: #08090f;
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
@@ -182,7 +204,20 @@ export function buildMarketingVideoHtml(
       width: ${width}px;
       height: ${height}px;
       overflow: hidden;
-      background: radial-gradient(circle at 50% 30%, #1e1b4b 0%, #090a0f 80%);
+      background: #08090f;
+    }
+    .ambient-glow {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      z-index: 0;
+      background: 
+        radial-gradient(circle at 20% 25%, rgba(99, 102, 241, 0.35) 0%, transparent 55%),
+        radial-gradient(circle at 80% 75%, rgba(168, 85, 247, 0.3) 0%, transparent 55%),
+        radial-gradient(circle at 50% 50%, rgba(6, 182, 212, 0.15) 0%, transparent 65%);
+      filter: blur(40px);
     }
     .scene {
       position: absolute;
@@ -196,6 +231,7 @@ export function buildMarketingVideoHtml(
       display: flex;
       align-items: center;
       justify-content: center;
+      z-index: 1;
     }
     .scene.active {
       opacity: 1;
@@ -213,32 +249,40 @@ export function buildMarketingVideoHtml(
       position: relative;
     }
     .brand-badge {
-      display: inline-block;
-      padding: 10px 24px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 32px;
       border-radius: 9999px;
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(129, 140, 248, 0.4);
-      color: #a5b4fc;
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
+      background: rgba(99, 102, 241, 0.2);
+      border: 1.5px solid rgba(165, 180, 252, 0.5);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
+      color: #e0e7ff;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
-      margin-bottom: 32px;
+      margin-bottom: 36px;
     }
     .headline {
-      font-size: 72px;
+      font-size: 80px;
       font-weight: 900;
-      line-height: 1.15;
-      color: #ffffff;
-      text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-      max-width: 90%;
-      margin-bottom: 24px;
+      line-height: 1.12;
+      letter-spacing: -0.025em;
+      background: linear-gradient(135deg, #ffffff 20%, #e0e7ff 65%, #a5b4fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+      max-width: 92%;
+      margin-bottom: 28px;
     }
     .subheadline {
-      font-size: 36px;
+      font-size: 38px;
       color: #94a3b8;
-      max-width: 80%;
+      max-width: 85%;
       line-height: 1.4;
+      font-weight: 500;
     }
     .image-wrapper {
       position: absolute;
@@ -255,6 +299,15 @@ export function buildMarketingVideoHtml(
       object-fit: cover;
       transform-origin: center center;
     }
+    .image-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      background: linear-gradient(to top, rgba(8,9,15,0.96) 0%, rgba(8,9,15,0.7) 45%, rgba(8,9,15,0.2) 80%, rgba(8,9,15,0.4) 100%);
+    }
     .ken-burns img {
       animation: kenBurnsAnim 8s ease-out infinite alternate;
     }
@@ -264,79 +317,117 @@ export function buildMarketingVideoHtml(
     }
     .product-content .overlay-text {
       position: absolute;
-      bottom: 120px;
+      bottom: 140px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 3;
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(16px);
-      padding: 32px 48px;
-      border-radius: 24px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      width: 85%;
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(24px);
+      padding: 36px 48px;
+      border-radius: 28px;
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
+      width: 88%;
+      text-align: center;
     }
     .scene-title {
-      font-size: 54px;
-      font-weight: 800;
+      font-size: 58px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
       margin-bottom: 16px;
+      background: linear-gradient(135deg, #ffffff 30%, #e2e8f0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
     .scene-subtitle {
-      font-size: 32px;
+      font-size: 34px;
       color: #cbd5e1;
+      line-height: 1.35;
+      font-weight: 500;
     }
     .features-list {
       list-style: none;
       text-align: left;
-      margin-top: 40px;
-      width: 85%;
+      margin-top: 48px;
+      width: 88%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
     }
     .feature-item {
       display: flex;
       align-items: center;
-      gap: 20px;
+      gap: 24px;
       font-size: 36px;
-      margin-bottom: 24px;
+      font-weight: 600;
+      color: #f8fafc;
       background: rgba(30, 41, 59, 0.7);
-      padding: 20px 28px;
-      border-radius: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      padding: 24px 32px;
+      border-radius: 20px;
+      border: 1.5px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
     }
     .feature-icon {
-      color: #38bdf8;
       font-size: 40px;
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .cta-content {
+      position: relative;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      max-width: 90%;
     }
     .cta-title {
-      font-size: 80px;
+      font-size: 84px;
       font-weight: 900;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 20%, #fef08a 85%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
       margin-bottom: 24px;
+      text-shadow: 0 10px 40px rgba(0,0,0,0.6);
     }
     .cta-subtitle {
-      font-size: 40px;
-      color: #cbd5e1;
-      margin-bottom: 48px;
+      font-size: 38px;
+      color: #e2e8f0;
+      margin-bottom: 52px;
+      line-height: 1.4;
+      font-weight: 500;
     }
     .cta-button {
       display: inline-block;
-      padding: 24px 60px;
-      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      padding: 28px 72px;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #9333ea 100%);
       color: #ffffff;
-      font-size: 42px;
+      font-size: 44px;
       font-weight: 800;
       border-radius: 9999px;
-      box-shadow: 0 10px 30px rgba(79, 70, 229, 0.4);
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      box-shadow: 0 16px 44px rgba(124, 58, 237, 0.55);
+      letter-spacing: 0.02em;
     }
     .subtitles-container {
       position: absolute;
-      bottom: 40px;
+      bottom: ${options.ratio === "9:16" ? "220px" : "60px"};
       left: 50%;
       transform: translateX(-50%);
       z-index: 10;
-      background: rgba(0, 0, 0, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      padding: 12px 28px;
-      border-radius: 14px;
-      font-size: 28px;
-      font-weight: 700;
+      background: rgba(8, 9, 15, 0.88);
+      backdrop-filter: blur(16px);
+      border: 1.5px solid rgba(254, 240, 138, 0.45);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+      padding: 16px 40px;
+      border-radius: 20px;
+      font-size: 34px;
+      font-weight: 800;
       color: #fef08a;
       text-shadow: 0 2px 4px rgba(0,0,0,0.8);
       max-width: 90%;
@@ -348,6 +439,7 @@ export function buildMarketingVideoHtml(
 </head>
 <body>
   <div class="video-viewport">
+    <div class="ambient-glow"></div>
     ${sceneElements.join("")}
   </div>
 
