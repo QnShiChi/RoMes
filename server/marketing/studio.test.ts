@@ -6,10 +6,12 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   detectImageFormat,
+  extractKeywordsForSearch,
   generateMarketingImages,
   generateMarketingVideoWorkflow,
   getMarketingDraft,
   markMarketingPublished,
+  resolveUnsplashKey,
   saveMarketingDraft,
 } from "./studio.ts";
 
@@ -40,6 +42,21 @@ describe("marketing studio core", () => {
     expect(detectImageFormat(VALID_JPEG)).toBe("jpeg");
     expect(detectImageFormat(VALID_PNG)).toBe("png");
     expect(detectImageFormat(Buffer.from("<html>error</html>"))).toBeNull();
+  });
+
+  it("extracts clean search keywords from verbose visual prompts", () => {
+    expect(
+      extractKeywordsForSearch(
+        "Photorealistic 8k close-up shot of cyber security glowing shield lock on server rack",
+      ),
+    ).toBe("close shot cyber security glowing");
+    expect(extractKeywordsForSearch("")).toBe("technology artificial intelligence");
+  });
+
+  it("resolves Unsplash access key from argument, environment, or config", () => {
+    expect(resolveUnsplashKey("custom-key")).toBe("custom-key");
+    const resolved = resolveUnsplashKey();
+    expect(typeof resolved).toBe("string");
   });
 
   it("generates multiple images in parallel, retries transient 502 errors, and saves files to disk", async () => {

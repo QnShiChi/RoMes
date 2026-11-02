@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
@@ -276,6 +277,77 @@ async function fetchFromGradioFluxSpace(
   };
 }
 
+export function resolveUnsplashKey(explicitKey?: string): string {
+  if (explicitKey?.trim()) return explicitKey.trim();
+  if (process.env.UNSPLASH_ACCESS_KEY?.trim()) return process.env.UNSPLASH_ACCESS_KEY.trim();
+  try {
+    const configPath = join(homedir(), ".openmausbot", "config.json");
+    if (existsSync(configPath)) {
+      const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+      const unsplashObj = parsed.unsplash as { accessKey?: string } | undefined;
+      if (typeof unsplashObj?.accessKey === "string" && unsplashObj.accessKey.trim()) {
+        return unsplashObj.accessKey.trim();
+      }
+      if (typeof parsed.unsplashAccessKey === "string" && parsed.unsplashAccessKey.trim()) {
+        return parsed.unsplashAccessKey.trim();
+      }
+    }
+  } catch {
+    // Config read error or missing file
+  }
+  return "";
+}
+
+export function extractKeywordsForSearch(prompt: string): string {
+  const cleaned = prompt
+    .toLowerCase()
+    .replace(
+      /\b(photorealistic|ultra realistic|high quality|8k|hyper-detailed|cinematic|detailed|portrait 9:16|vertical 9:16|commercial|studio lighting|4k|octane render|unreal engine)\b/gi,
+      "",
+    )
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokens = cleaned.split(" ").filter((w) => w.length > 2);
+  if (tokens.length === 0) return "technology artificial intelligence";
+  return tokens.slice(0, 5).join(" ");
+}
+
+export async function fetchFromUnsplash(
+  query: string,
+  width: number,
+  height: number,
+  accessKey: string,
+  index: number,
+  timeoutMs = 10_000,
+): Promise<{ buffer: Buffer; url: string } | null> {
+  const searchUrl = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&orientation=portrait&per_page=10`;
+  const res = await fetch(searchUrl, {
+    headers: {
+      Authorization: `Client-ID ${accessKey}`,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { results?: Array<{ urls?: { raw?: string; regular?: string } }> };
+  if (!data.results || data.results.length === 0) return null;
+
+  const chosen = data.results[index % data.results.length];
+  const rawUrl = chosen?.urls?.raw || chosen?.urls?.regular;
+  if (!rawUrl) return null;
+
+  const downloadUrl = `${rawUrl}&w=${width}&h=${height}&fit=crop&q=85&auto=format`;
+  const dlRes = await fetch(downloadUrl, {
+    headers: { Accept: "image/jpeg,image/png,*/*" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!dlRes.ok) return null;
+  const buffer = Buffer.from(await dlRes.arrayBuffer());
+  return { buffer, url: downloadUrl };
+}
+
 async function fetchSingleImage(
   spec: ImagePromptSpec,
   index: number,
@@ -292,35 +364,60 @@ async function fetchSingleImage(
       let buffer: Buffer | null = null;
       let url = "";
 
-      if (isGradioSpaceUrl(options.baseUrl)) {
-        try {
-          const out = await fetchFromGradioFluxSpace(
-            options.baseUrl,
-            spec.prompt.trim(),
-            width,
-            height,
-            seed,
-            options.timeoutMs,
-          );
-          buffer = out.buffer;
-          url = out.url;
-        } catch (gradioErr) {
-          lastError = gradioErr instanceof Error ? gradioErr.message : String(gradioErr);
+      if (!options.baseUrl.includes("127.0.0.1") && !options.baseUrl.includes("localhost")) {
+        const unsplashKey = resolveUnsplashKey();
+        if (unsplashKey) {
+          try {
+            const query = extractKeywordsForSearch(spec.prompt);
+            const unsplashOut = await fetchFromUnsplash(
+              query,
+              width,
+              height,
+              unsplashKey,
+              index,
+              options.timeoutMs,
+            );
+            if (unsplashOut) {
+              buffer = unsplashOut.buffer;
+              url = unsplashOut.url;
+            }
+          } catch {
+            // Unsplash query or download failed; proceed to next provider
+          }
         }
-      } else {
-        const encoded = encodeURIComponent(spec.prompt.trim());
-        url = `${options.baseUrl.replace(/\/+$/, "")}/${encoded}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
-        const response = await fetch(url, {
-          headers: {
-            accept: "image/jpeg,image/png,image/webp,*/*",
-            referer: "https://pollinations.ai",
-          },
-          signal: AbortSignal.timeout(options.timeoutMs),
-        });
-        if (response.ok) {
-          buffer = Buffer.from(await response.arrayBuffer());
+      }
+
+      if (!buffer) {
+        if (isGradioSpaceUrl(options.baseUrl)) {
+          try {
+            const out = await fetchFromGradioFluxSpace(
+              options.baseUrl,
+              spec.prompt.trim(),
+              width,
+              height,
+              seed,
+              options.timeoutMs,
+            );
+            buffer = out.buffer;
+            url = out.url;
+          } catch (gradioErr) {
+            lastError = gradioErr instanceof Error ? gradioErr.message : String(gradioErr);
+          }
         } else {
-          lastError = `HTTP ${response.status}`;
+          const encoded = encodeURIComponent(spec.prompt.trim());
+          url = `${options.baseUrl.replace(/\/+$/, "")}/${encoded}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
+          const response = await fetch(url, {
+            headers: {
+              accept: "image/jpeg,image/png,image/webp,*/*",
+              referer: "https://pollinations.ai",
+            },
+            signal: AbortSignal.timeout(options.timeoutMs),
+          });
+          if (response.ok) {
+            buffer = Buffer.from(await response.arrayBuffer());
+          } else {
+            lastError = `HTTP ${response.status}`;
+          }
         }
       }
 
@@ -592,10 +689,28 @@ export async function generateMarketingVideoWorkflow(
   const rawSceneDuration = input.scenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0);
   const scaleFactor = rawSceneDuration > 0 ? totalAudioMs / rawSceneDuration : 1;
 
-  const adjustedScenes = input.scenes.map((s) => ({
-    ...s,
-    durationMs: Math.max(500, Math.round((s.durationMs || 3000) * scaleFactor)),
-  }));
+  const adjustedScenes = input.scenes.map((s, idx) => {
+    let imgPath = s.imagePath;
+    if (!imgPath || !existsSync(imgPath)) {
+      const candidates = [
+        join(campaignDir, `image-${idx + 1}.jpg`),
+        join(campaignDir, `image-${idx + 1}.png`),
+        join(campaignDir, `image-${idx + 1}.webp`),
+        join(campaignDir, "image-1.jpg"),
+      ];
+      for (const cand of candidates) {
+        if (existsSync(cand)) {
+          imgPath = cand;
+          break;
+        }
+      }
+    }
+    return {
+      ...s,
+      imagePath: imgPath,
+      durationMs: Math.max(500, Math.round((s.durationMs || 3000) * scaleFactor)),
+    };
+  });
 
   const videoOutputPath = join(campaignDir, `${campaignSlug}-video.mp4`);
   const renderOutput: VideoRenderOutput = await renderMarketingVideo({
