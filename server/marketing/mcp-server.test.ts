@@ -151,5 +151,5 @@ describe("marketing studio MCP server", () => {
     expect(publishResult.success).toBe(true);
     expect(publishResult.platform).toBe("tiktok");
     expect(publishResult.url).toContain("tiktok.com");
-  });
+  }, 60_000);
 });

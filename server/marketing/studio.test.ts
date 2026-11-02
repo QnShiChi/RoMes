@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -75,6 +75,21 @@ describe("marketing studio core", () => {
     expect(readFileSync(result.images[0]!.filePath)).toEqual(VALID_JPEG);
     expect(readFileSync(result.images[1]!.filePath)).toEqual(VALID_JPEG);
     expect(result.images[0]!.label).toBe("Studio Shot");
+  });
+
+  it("falls back gracefully to curated visuals or local gradient when upstream is unavailable", async () => {
+    const root = makeTempDir();
+    const result = await generateMarketingImages(
+      {
+        campaignSlug: "fallback-test",
+        prompts: [{ prompt: "abstract futuristic cyber neon", label: "Hero" }],
+      },
+      { assetsRoot: root, baseUrl: "http://127.0.0.1:9999/broken", timeoutMs: 1_000, maxRetries: 0 },
+    );
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0]!.width).toBe(1080);
+    expect(result.images[0]!.height).toBe(1920);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
   });
 
   it("persists, retrieves, and updates campaign draft state", async () => {
