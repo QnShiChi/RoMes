@@ -182,7 +182,7 @@ const TOOLS = [
   {
     name: "publish_post",
     description:
-      "Publish a marketing video and caption headlessly to TikTok or Facebook without interactive browser steps.",
+      "Publish marketing content (video, image gallery, or text copy) headlessly to TikTok or Facebook without interactive browser steps.",
     inputSchema: {
       type: "object",
       properties: {
@@ -193,7 +193,12 @@ const TOOLS = [
         },
         videoPath: {
           type: "string",
-          description: "Absolute local path to the rendered .mp4 video.",
+          description: "Optional absolute local path to the rendered .mp4 video.",
+        },
+        imagePaths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of local image paths for photo posts.",
         },
         caption: {
           type: "string",
@@ -205,7 +210,7 @@ const TOOLS = [
           description: "Optional list of hashtags.",
         },
       },
-      required: ["platform", "videoPath", "caption"],
+      required: ["platform", "caption"],
     },
   },
 ];
@@ -286,10 +291,11 @@ async function handleCall(name: string, args: Record<string, unknown>) {
 
   if (name === "publish_post" || name === "marketing_studio_publish_post") {
     const platform = (args.platform === "facebook" ? "facebook" : "tiktok") as PublishPlatform;
-    const videoPath = String(args.videoPath ?? "");
+    const videoPath = args.videoPath ? String(args.videoPath) : undefined;
+    const imagePaths = Array.isArray(args.imagePaths) ? args.imagePaths.map(String) : undefined;
     const caption = String(args.caption ?? "");
     const hashtags = Array.isArray(args.hashtags) ? args.hashtags.map(String) : undefined;
-    const output = await publishPostHeadless({ platform, videoPath, caption, hashtags });
+    const output = await publishPostHeadless({ platform, videoPath, imagePaths, caption, hashtags });
     return {
       content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
     };

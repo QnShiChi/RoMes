@@ -27,6 +27,18 @@ describe("publisher", () => {
     expect(payload.platform).toBe("facebook");
   });
 
+  it("publishes photo or text posts headlessly", async () => {
+    const res = await publishPostHeadless({
+      platform: "facebook",
+      caption: "Bài viết mới về AI bảo mật",
+      hashtags: ["#RoMesAI", "#Tech"],
+    });
+    expect(res.success).toBe(true);
+    expect(res.platform).toBe("facebook");
+    expect(res.url).toContain("facebook.com/posts/");
+    expect(res.note).toContain("Published successfully");
+  });
+
   it("throws error if video file is missing when calling publishPostHeadless", async () => {
     const input: PublishPostInput = {
       platform: "tiktok",

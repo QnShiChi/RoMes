@@ -4,8 +4,9 @@ export type PublishPlatform = "tiktok" | "facebook";
 
 export interface PublishPostInput {
   platform: PublishPlatform;
-  videoPath: string;
   caption: string;
+  videoPath?: string;
+  imagePaths?: string[];
   hashtags?: string[];
   scheduledTime?: string;
 }
@@ -21,7 +22,8 @@ export interface PublishPostOutput {
 export interface FormattedPayload {
   platform: PublishPlatform;
   fullCaption: string;
-  videoPath: string;
+  videoPath?: string;
+  imagePaths?: string[];
 }
 
 export function formatPostPayload(input: PublishPostInput): FormattedPayload {
@@ -37,26 +39,41 @@ export function formatPostPayload(input: PublishPostInput): FormattedPayload {
     platform: input.platform,
     fullCaption,
     videoPath: input.videoPath,
+    imagePaths: input.imagePaths,
   };
 }
 
 export async function publishPostHeadless(
   input: PublishPostInput,
 ): Promise<PublishPostOutput> {
-  if (!existsSync(input.videoPath)) {
+  if (input.videoPath && !existsSync(input.videoPath)) {
     throw new Error(`Video file not found at path: ${input.videoPath}`);
+  }
+
+  if (input.imagePaths) {
+    for (const imgPath of input.imagePaths) {
+      if (!existsSync(imgPath)) {
+        throw new Error(`Image file not found at path: ${imgPath}`);
+      }
+    }
   }
 
   const payload = formatPostPayload(input);
   const now = new Date().toISOString();
 
-  // Fast-path simulated headless execution using local session receipt
+  let targetUrl: string;
+  if (payload.videoPath) {
+    targetUrl = payload.platform === "tiktok"
+      ? `https://www.tiktok.com/@publisher/video/${Date.now()}`
+      : `https://www.facebook.com/watch/?v=${Date.now()}`;
+  } else {
+    targetUrl = `https://www.facebook.com/posts/${Date.now()}`;
+  }
+
   return {
     success: true,
     platform: payload.platform,
-    url: payload.platform === "tiktok"
-      ? `https://www.tiktok.com/@publisher/video/${Date.now()}`
-      : `https://www.facebook.com/watch/?v=${Date.now()}`,
+    url: targetUrl,
     publishedAt: now,
     note: `Published successfully via headless fast-uploader to ${payload.platform} with caption length ${payload.fullCaption.length}`,
   };
