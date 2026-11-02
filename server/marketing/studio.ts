@@ -511,8 +511,8 @@ async function fetchSingleImage(
   campaignDir: string,
   options: Required<Pick<GenerateImagesOptions, "baseUrl" | "timeoutMs" | "maxRetries">>,
 ): Promise<GeneratedMarketingImage> {
-  const width = Math.min(Math.max(spec.width ?? 1024, 256), 2048);
-  const height = Math.min(Math.max(spec.height ?? 1024, 256), 2048);
+  const width = Math.min(Math.max(spec.width ?? 1080, 256), 2048);
+  const height = Math.min(Math.max(spec.height ?? 1920, 256), 2048);
   let lastError = "unknown error";
 
   for (let attempt = 0; attempt <= options.maxRetries; attempt += 1) {
@@ -612,24 +612,6 @@ export async function generateMarketingImages(
 
   const images: GeneratedMarketingImage[] = [];
   const failed: Array<{ index: number; prompt: string; error: string }> = [];
-
-  if (isGradioSpaceUrl(baseUrl)) {
-    for (let idx = 0; idx < prompts.length; idx += 1) {
-      const spec = prompts[idx]!;
-      try {
-        const img = await fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries });
-        images.push(img);
-      } catch (error) {
-        console.error("AIStudio item error:", error instanceof Error ? error.message : String(error));
-        failed.push({
-          index: idx + 1,
-          prompt: spec.prompt,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    return { campaignSlug, campaignDir, images, failed };
-  }
 
   const settled = await Promise.allSettled(
     prompts.map((spec, idx) =>
