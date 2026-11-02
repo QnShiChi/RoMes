@@ -1,6 +1,7 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Img,
   interpolate,
   spring,
   useCurrentFrame,
@@ -48,9 +49,12 @@ export const Scene: React.FC<SceneProps> = ({
   const orb2X = Math.cos(frame / 18) * 35;
   const orb2Y = Math.sin(frame / 22) * 45;
 
-  const ctaPulse = 1 + Math.sin(frame / 7) * 0.035;
-  const imageSource = scene.imagePath || scene.imageUrl;
+  const ctaPulse = 1 + Math.sin(frame / 7) * 0.04;
+  const kenBurnsScale = interpolate(frame, [0, durationInFrames], [1, 1.14], { extrapolateRight: "clamp" });
+
+  const imageSource = scene.imageUrl || scene.imagePath;
   const featuresList = scene.bulletPoints || scene.features;
+  const sceneType = scene.type || "product";
 
   return (
     <AbsoluteFill
@@ -62,6 +66,7 @@ export const Scene: React.FC<SceneProps> = ({
         opacity: sceneOpacity,
       }}
     >
+      {/* Dynamic Background Orbs */}
       <div
         style={{
           position: "absolute",
@@ -103,161 +108,499 @@ export const Scene: React.FC<SceneProps> = ({
 
       <MicroAnimation type={scene.animationType} isVertical={isVertical} />
 
-      <div
-        style={{
-          position: "relative",
-          zIndex: 10,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          height: "100%",
-          padding: isVertical ? "70px 48px" : "48px 80px",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "8px 20px",
-            borderRadius: "9999px",
-            background: "rgba(255, 255, 255, 0.06)",
-            border: "1px solid rgba(255, 255, 255, 0.15)",
-            backdropFilter: "blur(12px)",
-            transform: `translateY(${interpolate(frame, [0, 15], [-20, 0], { extrapolateRight: "clamp" })}px)`,
-            opacity: interpolate(frame, [0, 15], [0, 1], { extrapolateRight: "clamp" }),
-            marginBottom: isVertical ? "28px" : "18px",
-          }}
-        >
-          <span
+      {/* =========================================================================
+          LAYOUT 1: HOOK SCENE (Cinematic Full-Bleed Hero Image + Punchy Typography)
+          ========================================================================= */}
+      {sceneType === "hook" && (
+        <>
+          {imageSource && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                overflow: "hidden",
+              }}
+            >
+              <Img
+                src={imageSource}
+                alt={scene.title}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: `scale(${kenBurnsScale})`,
+                  filter: "brightness(0.38) contrast(1.15)",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background:
+                    "linear-gradient(180deg, rgba(7, 10, 18, 0.45) 0%, rgba(7, 10, 18, 0.75) 50%, #070a12 100%)",
+                }}
+              />
+            </div>
+          )}
+
+          <div
             style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              backgroundColor: "#10b981",
-              boxShadow: "0 0 10px #10b981",
-            }}
-          />
-          <span
-            style={{
-              fontSize: isVertical ? "20px" : "18px",
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              color: "#e2e8f0",
-              textTransform: "uppercase",
+              position: "relative",
+              zIndex: 10,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              padding: isVertical ? "80px 48px 220px 48px" : "48px 80px",
+              boxSizing: "border-box",
+              textAlign: "center",
             }}
           >
-            {brandName}
-          </span>
-        </div>
+            {/* High-Impact Top Badge */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "10px 24px",
+                borderRadius: "9999px",
+                background: "rgba(99, 102, 241, 0.2)",
+                border: "1px solid rgba(165, 180, 252, 0.35)",
+                backdropFilter: "blur(16px)",
+                marginBottom: "32px",
+                boxShadow: "0 0 20px rgba(99, 102, 241, 0.3)",
+              }}
+            >
+              <span
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  backgroundColor: "#ef4444",
+                  boxShadow: "0 0 12px #ef4444",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: isVertical ? "22px" : "18px",
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  color: "#f8fafc",
+                  textTransform: "uppercase",
+                }}
+              >
+                {brandName} · TIÊU ĐIỂM
+              </span>
+            </div>
 
+            {/* Giant Title */}
+            <div
+              style={{
+                transform: `scale(${titleSpring})`,
+                maxWidth: "96%",
+                marginBottom: "32px",
+              }}
+            >
+              <h1
+                style={{
+                  fontSize: isVertical ? "58px" : "46px",
+                  lineHeight: 1.15,
+                  fontWeight: 900,
+                  margin: 0,
+                  background: "linear-gradient(135deg, #ffffff 0%, #e0e7ff 40%, #818cf8 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  filter: "drop-shadow(0 6px 30px rgba(0, 0, 0, 0.6))",
+                }}
+              >
+                {scene.title}
+              </h1>
+            </div>
+
+            {/* Floating Tags */}
+            <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
+          </div>
+        </>
+      )}
+
+      {/* =========================================================================
+          LAYOUT 2: FEATURES SCENE (Asymmetrical Split: Photo Top + Staggered Cards Bottom)
+          ========================================================================= */}
+      {sceneType === "features" && (
         <div
           style={{
-            transform: `scale(${titleSpring})`,
-            textAlign: "center",
-            maxWidth: "92%",
-            marginBottom: isVertical ? "30px" : "20px",
+            position: "relative",
+            zIndex: 10,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            height: "100%",
+            padding: isVertical ? "65px 44px 220px 44px" : "40px 70px",
+            boxSizing: "border-box",
           }}
         >
-          <h1
+          {/* Header */}
+          <div
             style={{
-              fontSize: isVertical ? "52px" : "44px",
-              lineHeight: 1.15,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "7px 18px",
+              borderRadius: "9999px",
+              background: "rgba(255, 255, 255, 0.08)",
+              border: "1px solid rgba(255, 255, 255, 0.18)",
+              backdropFilter: "blur(12px)",
+              marginBottom: "18px",
+            }}
+          >
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                backgroundColor: "#38bdf8",
+                boxShadow: "0 0 10px #38bdf8",
+              }}
+            />
+            <span
+              style={{
+                fontSize: isVertical ? "19px" : "16px",
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                color: "#e2e8f0",
+                textTransform: "uppercase",
+              }}
+            >
+              {brandName} · CHIẾN LƯỢC
+            </span>
+          </div>
+
+          <h2
+            style={{
+              fontSize: isVertical ? "46px" : "38px",
+              lineHeight: 1.18,
               fontWeight: 800,
-              margin: 0,
-              background: "linear-gradient(135deg, #ffffff 0%, #e0e7ff 50%, #a5b4fc 100%)",
+              margin: "0 0 22px 0",
+              textAlign: "center",
+              background: "linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
-              filter: "drop-shadow(0 4px 20px rgba(0, 0, 0, 0.4))",
             }}
           >
             {scene.title}
-          </h1>
-        </div>
+          </h2>
 
-        {imageSource && (
-          <DeviceMockup imageSource={imageSource} isVertical={isVertical} />
-        )}
+          {/* Featured Visual Window */}
+          {imageSource && (
+            <div
+              style={{
+                width: isVertical ? "94%" : "68%",
+                height: isVertical ? "32%" : "38%",
+                borderRadius: "24px",
+                overflow: "hidden",
+                border: "1px solid rgba(255, 255, 255, 0.22)",
+                boxShadow: "0 20px 50px -10px rgba(0, 0, 0, 0.7), 0 0 35px rgba(56, 189, 248, 0.2)",
+                position: "relative",
+                marginBottom: "20px",
+              }}
+            >
+              <Img
+                src={imageSource}
+                alt={scene.title}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: `scale(${kenBurnsScale})`,
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "linear-gradient(180deg, transparent 60%, rgba(7, 10, 18, 0.8) 100%)",
+                }}
+              />
+            </div>
+          )}
 
-        <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
-
-        {featuresList && featuresList.length > 0 && (
-          <div
-            style={{
-              width: isVertical ? "92%" : "70%",
-              display: "flex",
-              flexDirection: "column",
-              gap: "14px",
-              marginTop: isVertical ? "20px" : "14px",
-            }}
-          >
-            {featuresList.map((feat, idx) => {
-              const itemSpring = spring({
-                frame: Math.max(0, frame - 8 - idx * 5),
-                fps,
-                config: { damping: 13, mass: 0.6 },
-              });
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    transform: `scale(${itemSpring})`,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "16px",
-                    padding: isVertical ? "16px 22px" : "12px 18px",
-                    borderRadius: "18px",
-                    background: "rgba(255, 255, 255, 0.05)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    backdropFilter: "blur(16px)",
-                  }}
-                >
-                  <span style={{ fontSize: "22px", color: "#818cf8" }}>✦</span>
-                  <span
+          {/* Staggered Animated Feature Cards */}
+          {featuresList && featuresList.length > 0 && (
+            <div
+              style={{
+                width: isVertical ? "94%" : "72%",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              {featuresList.map((feat, idx) => {
+                const itemSpring = spring({
+                  frame: Math.max(0, frame - 6 - idx * 4),
+                  fps,
+                  config: { damping: 13, mass: 0.6 },
+                });
+                const icons = ["✦", "⚡", "🛡️", "🚀", "💡"];
+                const icon = icons[idx % icons.length];
+                return (
+                  <div
+                    key={idx}
                     style={{
-                      fontSize: isVertical ? "24px" : "20px",
-                      fontWeight: 600,
-                      color: "#f8fafc",
+                      transform: `scale(${itemSpring})`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "14px",
+                      padding: isVertical ? "15px 20px" : "12px 18px",
+                      borderRadius: "18px",
+                      background: "rgba(255, 255, 255, 0.06)",
+                      border: "1px solid rgba(255, 255, 255, 0.14)",
+                      backdropFilter: "blur(16px)",
                     }}
                   >
-                    {feat}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                    <span style={{ fontSize: "20px", color: "#60a5fa" }}>{icon}</span>
+                    <span
+                      style={{
+                        fontSize: isVertical ? "23px" : "19px",
+                        fontWeight: 600,
+                        color: "#f8fafc",
+                      }}
+                    >
+                      {feat}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-        {scene.type === "cta" && (
+          <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
+        </div>
+      )}
+
+      {/* =========================================================================
+          LAYOUT 3: CTA SCENE (Pulsing High-Conversion Action Button + Authority Badge)
+          ========================================================================= */}
+      {sceneType === "cta" && (
+        <>
+          {imageSource && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                overflow: "hidden",
+              }}
+            >
+              <Img
+                src={imageSource}
+                alt={scene.title}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  filter: "blur(24px) brightness(0.25)",
+                  transform: "scale(1.1)",
+                }}
+              />
+            </div>
+          )}
+
           <div
             style={{
-              marginTop: isVertical ? "28px" : "18px",
-              transform: `scale(${ctaPulse})`,
+              position: "relative",
+              zIndex: 10,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              padding: isVertical ? "80px 48px 220px 48px" : "48px 80px",
+              boxSizing: "border-box",
+              textAlign: "center",
             }}
           >
             <div
               style={{
-                padding: isVertical ? "20px 48px" : "16px 36px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "8px 22px",
                 borderRadius: "9999px",
-                background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
-                boxShadow: "0 10px 35px rgba(99, 102, 241, 0.5), 0 0 20px rgba(168, 85, 247, 0.4)",
-                fontWeight: 700,
-                fontSize: isVertical ? "28px" : "22px",
-                color: "#ffffff",
-                letterSpacing: "0.04em",
-                textAlign: "center",
+                background: "rgba(236, 72, 153, 0.2)",
+                border: "1px solid rgba(244, 114, 182, 0.4)",
+                backdropFilter: "blur(12px)",
+                marginBottom: "28px",
               }}
             >
-              {scene.subtitle || "Trải Nghiệm Ngay"}
+              <span
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: "#ec4899",
+                  boxShadow: "0 0 10px #ec4899",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: isVertical ? "20px" : "17px",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  color: "#fbcfe8",
+                  textTransform: "uppercase",
+                }}
+              >
+                {brandName} · HÀNH ĐỘNG
+              </span>
             </div>
-          </div>
-        )}
 
-        {scene.subtitle && scene.type !== "cta" && (
-          <KineticCaptions text={scene.subtitle} isVertical={isVertical} />
-        )}
-      </div>
+            <div
+              style={{
+                transform: `scale(${titleSpring})`,
+                maxWidth: "94%",
+                marginBottom: "36px",
+              }}
+            >
+              <h1
+                style={{
+                  fontSize: isVertical ? "54px" : "44px",
+                  lineHeight: 1.18,
+                  fontWeight: 900,
+                  margin: 0,
+                  background: "linear-gradient(135deg, #ffffff 0%, #fbcfe8 50%, #f472b6 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  filter: "drop-shadow(0 6px 30px rgba(0, 0, 0, 0.5))",
+                }}
+              >
+                {scene.title}
+              </h1>
+            </div>
+
+            {/* Giant Pulsing Action Button */}
+            <div
+              style={{
+                transform: `scale(${ctaPulse})`,
+                marginBottom: "28px",
+              }}
+            >
+              <div
+                style={{
+                  padding: isVertical ? "22px 52px" : "18px 40px",
+                  borderRadius: "9999px",
+                  background: "linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)",
+                  boxShadow:
+                    "0 15px 45px rgba(99, 102, 241, 0.6), 0 0 30px rgba(236, 72, 153, 0.4)",
+                  fontWeight: 800,
+                  fontSize: isVertical ? "28px" : "22px",
+                  color: "#ffffff",
+                  letterSpacing: "0.04em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "14px",
+                }}
+              >
+                <span>{scene.subtitle || "Bắt Đầu Ngay"}</span>
+                <span style={{ fontSize: "30px" }}>➔</span>
+              </div>
+            </div>
+
+            <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
+          </div>
+        </>
+      )}
+
+      {/* =========================================================================
+          LAYOUT 4: PRODUCT / SHOWCASE (3D Floating Glass Frame with Badges)
+          ========================================================================= */}
+      {sceneType !== "hook" && sceneType !== "features" && sceneType !== "cta" && (
+        <div
+          style={{
+            position: "relative",
+            zIndex: 10,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            height: "100%",
+            padding: isVertical ? "70px 48px 220px 48px" : "48px 80px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "8px 20px",
+              borderRadius: "9999px",
+              background: "rgba(255, 255, 255, 0.06)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              backdropFilter: "blur(12px)",
+              transform: `translateY(${interpolate(frame, [0, 15], [-20, 0], { extrapolateRight: "clamp" })}px)`,
+              opacity: interpolate(frame, [0, 15], [0, 1], { extrapolateRight: "clamp" }),
+              marginBottom: isVertical ? "24px" : "16px",
+            }}
+          >
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                backgroundColor: "#10b981",
+                boxShadow: "0 0 10px #10b981",
+              }}
+            />
+            <span
+              style={{
+                fontSize: isVertical ? "20px" : "18px",
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                color: "#e2e8f0",
+                textTransform: "uppercase",
+              }}
+            >
+              {brandName}
+            </span>
+          </div>
+
+          <div
+            style={{
+              transform: `scale(${titleSpring})`,
+              textAlign: "center",
+              maxWidth: "92%",
+              marginBottom: isVertical ? "26px" : "18px",
+            }}
+          >
+            <h1
+              style={{
+                fontSize: isVertical ? "50px" : "42px",
+                lineHeight: 1.15,
+                fontWeight: 800,
+                margin: 0,
+                background: "linear-gradient(135deg, #ffffff 0%, #e0e7ff 50%, #a5b4fc 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                filter: "drop-shadow(0 4px 20px rgba(0, 0, 0, 0.4))",
+              }}
+            >
+              {scene.title}
+            </h1>
+          </div>
+
+          {imageSource && (
+            <DeviceMockup imageSource={imageSource} isVertical={isVertical} />
+          )}
+
+          <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
+        </div>
+      )}
+
+      {/* Synchronized Kinetic Captions for voiceover / narration */}
+      {scene.subtitle && sceneType !== "cta" && (
+        <KineticCaptions text={scene.subtitle} isVertical={isVertical} />
+      )}
     </AbsoluteFill>
   );
 };

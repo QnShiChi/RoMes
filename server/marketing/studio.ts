@@ -298,9 +298,36 @@ export function resolveUnsplashKey(explicitKey?: string): string {
   return "";
 }
 
+function stripDiacritics(str: string): string {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D");
+}
+
+const TOPIC_CONCEPT_MAP: Array<{ patterns: RegExp; english: string }> = [
+  { patterns: /\b(cybersecurity|cyber|security|privacy|bao mat|an toan|ma hoa|shield|khoa)\b/i, english: "cybersecurity network data security" },
+  { patterns: /\b(email|thu tin|gui tu dong|automation)\b/i, english: "email automation business computer" },
+  { patterns: /\b(data center|trung tam du lieu|gpu|sieu cum|ha tang|server)\b/i, english: "data center server gpu" },
+  { patterns: /\b(ban co|quan co|chien luoc|phong hop|hologram|boardroom)\b/i, english: "business strategy technology futuristic" },
+  { patterns: /\b(cloud|dam may|du lieu|mang luoi|network)\b/i, english: "cloud computing big data network" },
+  { patterns: /\b(phone|smartphone|laptop|thiet bi|tro ly|dien thoai)\b/i, english: "smartphone laptop artificial intelligence" },
+  { patterns: /\b(big tech|facebook|microsoft|google|apple|openai|meta)\b/i, english: "artificial intelligence corporate technology" },
+  { patterns: /\b(con duong|tuong lai|anh sang|kham pha|chan troi|cta)\b/i, english: "futuristic technology digital innovation" },
+  { patterns: /\b(robot|nguoi may|co khi|tu dong hoa)\b/i, english: "ai robot modern technology" },
+];
+
 export function extractKeywordsForSearch(prompt: string): string {
-  const cleaned = prompt
-    .toLowerCase()
+  const normalized = stripDiacritics(prompt).toLowerCase();
+  const strippedPrefix = normalized.replace(
+    /^(hook|cta|phan canh \d+|canh \d+|scene \d+|ha tang ai|chien luoc|cloud & doanh nghiep|thiet bi ca nhan)\s*[-–:]*\s*/i,
+    "",
+  );
+
+  for (const entry of TOPIC_CONCEPT_MAP) {
+    if (entry.patterns.test(strippedPrefix) || entry.patterns.test(normalized)) {
+      return entry.english;
+    }
+  }
+
+  const cleaned = strippedPrefix
     .replace(
       /\b(photorealistic|ultra realistic|high quality|8k|hyper-detailed|cinematic|detailed|portrait 9:16|vertical 9:16|commercial|studio lighting|4k|octane render|unreal engine)\b/gi,
       "",
@@ -310,7 +337,7 @@ export function extractKeywordsForSearch(prompt: string): string {
     .trim();
 
   const tokens = cleaned.split(" ").filter((w) => w.length > 2);
-  if (tokens.length === 0) return "technology artificial intelligence";
+  if (tokens.length === 0) return "technology artificial intelligence business";
   return tokens.slice(0, 5).join(" ");
 }
 

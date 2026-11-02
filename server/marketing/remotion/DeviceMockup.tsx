@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { Img, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 
 export const DeviceMockup: React.FC<{
   imageSource: string;
@@ -44,7 +44,7 @@ export const DeviceMockup: React.FC<{
           position: "relative",
         }}
       >
-        <img
+        <Img
           src={imageSource}
           alt="Marketing visual"
           style={{

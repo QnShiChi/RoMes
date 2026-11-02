@@ -49,8 +49,13 @@ describe("marketing studio core", () => {
       extractKeywordsForSearch(
         "Photorealistic 8k close-up shot of cyber security glowing shield lock on server rack",
       ),
-    ).toBe("close shot cyber security glowing");
-    expect(extractKeywordsForSearch("")).toBe("technology artificial intelligence");
+    ).toBe("cybersecurity network data security");
+    expect(
+      extractKeywordsForSearch(
+        "Hook – bàn cờ neon, quân cờ là nút mạng dữ liệu",
+      ),
+    ).toBe("business strategy technology futuristic");
+    expect(extractKeywordsForSearch("")).toBe("technology artificial intelligence business");
   });
 
   it("resolves Unsplash access key from argument, environment, or config", () => {

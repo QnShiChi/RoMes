@@ -92,14 +92,15 @@ export async function renderWithRemotion(
   const { selectComposition, renderMedia } = await import("@remotion/renderer");
   const serveUrl = await getRemotionBundle();
 
-  const resolvedScenes = spec.scenes.map((s) => ({
-    ...s,
-    imageUrl: s.imagePath
-      ? resolveImageSource(s.imagePath)
-      : (s as { imageUrl?: string }).imageUrl
-        ? resolveImageSource((s as { imageUrl?: string }).imageUrl)
-        : undefined,
-  }));
+  const resolvedScenes = spec.scenes.map((s) => {
+    const raw = s.imagePath || (s as { imageUrl?: string }).imageUrl;
+    const resolvedUrl = raw ? resolveImageSource(raw) : undefined;
+    return {
+      ...s,
+      imageUrl: resolvedUrl,
+      imagePath: resolvedUrl,
+    };
+  });
 
   const inputProps = {
     scenes: resolvedScenes,
