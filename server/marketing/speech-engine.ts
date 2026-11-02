@@ -26,7 +26,14 @@ export interface SpeechEngineOptions {
   synthesizer?: (input: SpeechGenerationInput) => Promise<Buffer>;
 }
 
-export const DEFAULT_SPEECH_MODEL = "gemini-3.8-flash-tts";
+export const GEMINI_TTS_MODELS = [
+  "gemini-3.8-flash-lite-tts",
+  "gemini-3.1-flash-tts-preview",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-3.8-flash-tts",
+] as const;
+
+export const DEFAULT_SPEECH_MODEL = GEMINI_TTS_MODELS[0];
 export const DEFAULT_VOICE = "Puck";
 
 export function resolveGeminiApiKey(explicitKey?: string, configHome?: string): string {
@@ -147,53 +154,103 @@ export function detectAudioFormat(buffer: Buffer): "wav" | "mp3" {
   return "wav";
 }
 
+export function wrapPcmInWav(
+  pcm: Buffer,
+  sampleRate = 24000,
+  channels = 1,
+  bitsPerSample = 16,
+): Buffer {
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const dataSize = pcm.length;
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcm]);
+}
+
 async function synthesizeViaGeminiApi(
   apiKey: string,
   script: string,
   voice: string,
   timeoutMs: number,
-): Promise<Buffer> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_SPEECH_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: script }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice || DEFAULT_VOICE },
+): Promise<{ buffer: Buffer; model: string }> {
+  let lastError: Error | null = null;
+
+  for (const model of GEMINI_TTS_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: script }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voice || DEFAULT_VOICE },
+              },
+            },
           },
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Gemini Speech API failed HTTP ${response.status}: ${await response.text()}`);
-  }
+      if (!response.ok) {
+        lastError = new Error(`Gemini Speech API (${model}) failed HTTP ${response.status}: ${await response.text()}`);
+        continue;
+      }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{
-          inlineData?: {
-            mimeType?: string;
-            data?: string;
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              inlineData?: {
+                mimeType?: string;
+                data?: string;
+              };
+            }>;
           };
         }>;
       };
-    }>;
-  };
 
-  const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!b64) {
-    throw new Error("No inlineData audio received from Gemini Speech API");
+      const part = data.candidates?.[0]?.content?.parts?.[0];
+      const b64 = part?.inlineData?.data;
+      if (!b64) {
+        lastError = new Error(`No inlineData audio received from Gemini model ${model}`);
+        continue;
+      }
+
+      const rawBuffer = Buffer.from(b64, "base64");
+      const mime = part?.inlineData?.mimeType?.toLowerCase() || "";
+
+      if (mime.includes("l16") || mime.includes("pcm")) {
+        const rateMatch = mime.match(/rate=(\d+)/);
+        const rate = rateMatch ? Number.parseInt(rateMatch[1], 10) : 24000;
+        return { buffer: wrapPcmInWav(rawBuffer, rate), model };
+      }
+
+      return { buffer: rawBuffer, model };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  return Buffer.from(b64, "base64");
+  throw lastError ?? new Error("All Gemini TTS models failed");
 }
 
 export async function synthesizeViaGoogleTts(
@@ -283,8 +340,8 @@ export async function generateMarketingSpeech(
 
   const voice = input.voice?.trim() || DEFAULT_VOICE;
   const timeoutMs = input.timeoutMs ?? 60_000;
-  let audioBuffer: Buffer;
-  let audioModel = DEFAULT_SPEECH_MODEL;
+  let audioBuffer: Buffer = createSynthesizedWavBuffer(2);
+  let audioModel: string = DEFAULT_SPEECH_MODEL;
 
   if (options?.synthesizer) {
     audioBuffer = await options.synthesizer(input);
@@ -294,7 +351,9 @@ export async function generateMarketingSpeech(
 
     if (apiKey) {
       try {
-        audioBuffer = await synthesizeViaGeminiApi(apiKey, script, voice, timeoutMs);
+        const geminiRes = await synthesizeViaGeminiApi(apiKey, script, voice, timeoutMs);
+        audioBuffer = geminiRes.buffer;
+        audioModel = geminiRes.model;
         synthesized = true;
       } catch {
         // Fall back to Google TTS on quota or API error

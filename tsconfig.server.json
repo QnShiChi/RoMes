@@ -28,6 +28,7 @@
     "connector"
   ],
   "exclude": [
-    "server/drivers/pi-mcp-extension.ts"
+    "server/drivers/pi-mcp-extension.ts",
+    "server/marketing/remotion"
   ]
 }

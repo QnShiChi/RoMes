@@ -4,10 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SPEECH_MODEL,
   generateMarketingSpeech,
   probeAudioDurationMs,
   resolveGeminiApiKey,
   type SpeechGenerationInput,
+  wrapPcmInWav,
 } from "./speech-engine.ts";
 
 describe("speech-engine", () => {
@@ -51,8 +53,17 @@ describe("speech-engine", () => {
     expect(result.durationMs).toBe(3500);
     expect(result.format).toBe("wav");
     expect(result.bytes).toBe(fakeAudio.byteLength);
-    expect(result.model).toBe("gemini-3.8-flash-tts");
+    expect(result.model).toBe(DEFAULT_SPEECH_MODEL);
     expect(readFileSync(result.audioPath)).toEqual(fakeAudio);
+  });
+
+  it("wraps raw PCM buffer with valid RIFF/WAVE header", () => {
+    const rawPcm = Buffer.alloc(4800);
+    const wav = wrapPcmInWav(rawPcm, 24000, 1, 16);
+    expect(wav.length).toBe(4800 + 44);
+    expect(wav.toString("ascii", 0, 4)).toBe("RIFF");
+    expect(wav.toString("ascii", 8, 12)).toBe("WAVE");
+    expect(wav.readUInt32LE(24)).toBe(24000);
   });
 
   it("handles custom language, voice, and audio formats", async () => {
