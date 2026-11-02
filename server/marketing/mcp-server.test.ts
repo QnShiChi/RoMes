@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -68,6 +68,7 @@ describe("marketing studio MCP server", () => {
       "save_marketing_draft",
       "get_marketing_draft",
       "mark_marketing_published",
+      "publish_post",
     ]);
 
     const generated = await rpc(3, "tools/call", {
@@ -132,5 +133,23 @@ describe("marketing studio MCP server", () => {
     expect(videoResult.width).toBe(1920);
     expect(videoResult.height).toBe(1080);
     expect(videoResult.ratio).toBe("16:9");
+
+    const sampleVideoPath = join(assetsRoot, "dummy-video.mp4");
+    writeFileSync(sampleVideoPath, "fake-mp4-data");
+
+    const publishCall = await rpc(7, "tools/call", {
+      name: "publish_post",
+      arguments: {
+        platform: "tiktok",
+        videoPath: sampleVideoPath,
+        caption: "Bàn phím cơ đỉnh cao",
+        hashtags: ["Keychron", "Tech"],
+      },
+    });
+    expect(publishCall.result.isError).toBeUndefined();
+    const publishResult = JSON.parse(publishCall.result.content[0].text);
+    expect(publishResult.success).toBe(true);
+    expect(publishResult.platform).toBe("tiktok");
+    expect(publishResult.url).toContain("tiktok.com");
   });
 });

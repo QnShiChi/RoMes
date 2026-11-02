@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { publishPostHeadless, type PublishPlatform } from "./publisher.ts";
 import {
   generateMarketingImages,
   generateMarketingVideoWorkflow,
@@ -178,6 +179,35 @@ const TOOLS = [
       required: ["campaignSlug", "results"],
     },
   },
+  {
+    name: "publish_post",
+    description:
+      "Publish a marketing video and caption headlessly to TikTok or Facebook without interactive browser steps.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        platform: {
+          type: "string",
+          enum: ["tiktok", "facebook"],
+          description: "Target social media platform.",
+        },
+        videoPath: {
+          type: "string",
+          description: "Absolute local path to the rendered .mp4 video.",
+        },
+        caption: {
+          type: "string",
+          description: "Post caption text.",
+        },
+        hashtags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of hashtags.",
+        },
+      },
+      required: ["platform", "videoPath", "caption"],
+    },
+  },
 ];
 
 function send(message: Record<string, unknown>): void {
@@ -251,6 +281,17 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     });
     return {
       content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
+    };
+  }
+
+  if (name === "publish_post" || name === "marketing_studio_publish_post") {
+    const platform = (args.platform === "facebook" ? "facebook" : "tiktok") as PublishPlatform;
+    const videoPath = String(args.videoPath ?? "");
+    const caption = String(args.caption ?? "");
+    const hashtags = Array.isArray(args.hashtags) ? args.hashtags.map(String) : undefined;
+    const output = await publishPostHeadless({ platform, videoPath, caption, hashtags });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
     };
   }
 
