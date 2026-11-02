@@ -2,6 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 
 export type VideoRatio = "9:16" | "16:9";
 
+export type ContextualAnimationType =
+  | "email"
+  | "ai"
+  | "speed"
+  | "security"
+  | "growth"
+  | "default";
+
 export type MarketingSceneType = "hook" | "product" | "features" | "cta";
 
 export interface MarketingSceneSpec {
@@ -13,6 +21,8 @@ export interface MarketingSceneSpec {
   durationMs: number;
   subtitles?: string[];
   brandName?: string;
+  animationType?: ContextualAnimationType;
+  floatingTags?: string[];
 }
 
 export interface TemplateOptions {

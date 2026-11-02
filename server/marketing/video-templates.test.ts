@@ -91,4 +91,17 @@ describe("video-templates", () => {
     expect(doc).toContain("1080px");
     expect(doc).toContain("1920px");
   });
+
+  it("supports dynamic scenes with animationType and floatingTags", () => {
+    const scene: MarketingSceneSpec = {
+      type: "features",
+      title: "Tự động gửi email",
+      subtitle: "Chỉ với 1 câu lệnh",
+      animationType: "email",
+      floatingTags: ["Tiết kiệm 2h", "100% tự động"],
+      durationMs: 3000,
+    };
+    expect(scene.animationType).toBe("email");
+    expect(scene.floatingTags?.length).toBe(2);
+  });
 });
