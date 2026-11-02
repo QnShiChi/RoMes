@@ -1,5 +1,13 @@
 export type VideoRatio = "9:16" | "16:9" | "1:1";
 
+export type ContextualAnimationType =
+  | "email"
+  | "ai"
+  | "speed"
+  | "security"
+  | "growth"
+  | "default";
+
 export interface MarketingSceneSpec {
   type: "hook" | "product" | "problem" | "solution" | "features" | "stats" | "cta";
   title: string;
@@ -9,6 +17,8 @@ export interface MarketingSceneSpec {
   imageUrl?: string;
   imagePath?: string;
   durationMs?: number;
+  animationType?: ContextualAnimationType;
+  floatingTags?: string[];
 }
 
 export interface RemotionVideoProps {

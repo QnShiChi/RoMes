@@ -6,6 +6,10 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { DeviceMockup } from "./DeviceMockup.tsx";
+import { FloatingBadges } from "./FloatingBadges.tsx";
+import { KineticCaptions } from "./KineticCaptions.tsx";
+import { MicroAnimation } from "./MicroAnimations.tsx";
 import type { MarketingSceneSpec, VideoRatio } from "./types.ts";
 
 interface SceneProps {
@@ -39,25 +43,14 @@ export const Scene: React.FC<SceneProps> = ({
     config: { damping: 12, mass: 0.6 },
   });
 
-  const cardSpring = spring({
-    frame: Math.max(0, frame - 4),
-    fps,
-    config: { damping: 14, mass: 0.8 },
-  });
-
-  const imageScale = interpolate(
-    frame,
-    [0, durationInFrames],
-    [1, 1.08],
-    { extrapolateRight: "clamp" },
-  );
-
   const orb1X = Math.sin(frame / 20) * 40;
   const orb1Y = Math.cos(frame / 25) * 30;
   const orb2X = Math.cos(frame / 18) * 35;
   const orb2Y = Math.sin(frame / 22) * 45;
 
   const ctaPulse = 1 + Math.sin(frame / 7) * 0.035;
+  const imageSource = scene.imagePath || scene.imageUrl;
+  const featuresList = scene.bulletPoints || scene.features;
 
   return (
     <AbsoluteFill
@@ -108,6 +101,8 @@ export const Scene: React.FC<SceneProps> = ({
         }}
       />
 
+      <MicroAnimation type={scene.animationType} isVertical={isVertical} />
+
       <div
         style={{
           position: "relative",
@@ -132,7 +127,7 @@ export const Scene: React.FC<SceneProps> = ({
             backdropFilter: "blur(12px)",
             transform: `translateY(${interpolate(frame, [0, 15], [-20, 0], { extrapolateRight: "clamp" })}px)`,
             opacity: interpolate(frame, [0, 15], [0, 1], { extrapolateRight: "clamp" }),
-            marginBottom: isVertical ? "32px" : "20px",
+            marginBottom: isVertical ? "28px" : "18px",
           }}
         >
           <span
@@ -161,13 +156,13 @@ export const Scene: React.FC<SceneProps> = ({
           style={{
             transform: `scale(${titleSpring})`,
             textAlign: "center",
-            maxWidth: "90%",
-            marginBottom: isVertical ? "40px" : "24px",
+            maxWidth: "92%",
+            marginBottom: isVertical ? "30px" : "20px",
           }}
         >
           <h1
             style={{
-              fontSize: isVertical ? "54px" : "46px",
+              fontSize: isVertical ? "52px" : "44px",
               lineHeight: 1.15,
               fontWeight: 800,
               margin: 0,
@@ -181,49 +176,23 @@ export const Scene: React.FC<SceneProps> = ({
           </h1>
         </div>
 
-        {(scene.imagePath || scene.imageUrl) && (
-          <div
-            style={{
-              transform: `scale(${cardSpring})`,
-              width: isVertical ? "92%" : "60%",
-              flex: 1,
-              maxHeight: isVertical ? "52%" : "55%",
-              borderRadius: "28px",
-              overflow: "hidden",
-              border: "1px solid rgba(255, 255, 255, 0.16)",
-              boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.2)",
-              position: "relative",
-              backgroundColor: "#0b0f19",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <img
-              src={scene.imagePath || scene.imageUrl}
-              alt={scene.title}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: `scale(${imageScale})`,
-                transformOrigin: "center center",
-              }}
-            />
-          </div>
+        {imageSource && (
+          <DeviceMockup imageSource={imageSource} isVertical={isVertical} />
         )}
 
-        {(scene.bulletPoints || scene.features) && (scene.bulletPoints || scene.features)!.length > 0 && (
+        <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
+
+        {featuresList && featuresList.length > 0 && (
           <div
             style={{
               width: isVertical ? "92%" : "70%",
               display: "flex",
               flexDirection: "column",
               gap: "14px",
-              marginTop: isVertical ? "24px" : "16px",
+              marginTop: isVertical ? "20px" : "14px",
             }}
           >
-            {(scene.bulletPoints || scene.features)!.map((feat, idx) => {
+            {featuresList.map((feat, idx) => {
               const itemSpring = spring({
                 frame: Math.max(0, frame - 8 - idx * 5),
                 fps,
@@ -263,7 +232,7 @@ export const Scene: React.FC<SceneProps> = ({
         {scene.type === "cta" && (
           <div
             style={{
-              marginTop: isVertical ? "32px" : "20px",
+              marginTop: isVertical ? "28px" : "18px",
               transform: `scale(${ctaPulse})`,
             }}
           >
@@ -286,34 +255,7 @@ export const Scene: React.FC<SceneProps> = ({
         )}
 
         {scene.subtitle && scene.type !== "cta" && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: isVertical ? "220px" : "60px",
-              maxWidth: "88%",
-              padding: "14px 28px",
-              borderRadius: "16px",
-              background: "rgba(15, 23, 42, 0.85)",
-              border: "1px solid rgba(99, 102, 241, 0.4)",
-              boxShadow: "0 10px 25px rgba(0, 0, 0, 0.5)",
-              backdropFilter: "blur(12px)",
-              textAlign: "center",
-              transform: `translateY(${interpolate(frame, [0, 10], [15, 0], { extrapolateRight: "clamp" })}px)`,
-              opacity: interpolate(frame, [0, 10], [0, 1], { extrapolateRight: "clamp" }),
-            }}
-          >
-            <p
-              style={{
-                fontSize: isVertical ? "26px" : "22px",
-                fontWeight: 600,
-                color: "#f1f5f9",
-                margin: 0,
-                lineHeight: 1.35,
-              }}
-            >
-              {scene.subtitle}
-            </p>
-          </div>
+          <KineticCaptions text={scene.subtitle} isVertical={isVertical} />
         )}
       </div>
     </AbsoluteFill>
