@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
+import { legacyScenesToBeatManifest, type CampaignBeatManifest, type NarrativeBeat } from "./beat-schema.ts";
+import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
 import { generateMarketingSpeech } from "./speech-engine.ts";
 import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
@@ -661,7 +663,8 @@ export async function getMarketingDraft(
 export interface GenerateMarketingVideoInput {
   campaignSlug: string;
   script: string;
-  scenes: MarketingSceneSpec[];
+  scenes?: MarketingSceneSpec[];
+  beats?: NarrativeBeat[];
   ratio?: VideoRatio;
   bgmTheme?: BgmTheme;
   voice?: string;
@@ -953,14 +956,49 @@ export async function generateMarketingVideoWorkflow(
   });
 
   const videoOutputPath = join(campaignDir, `${campaignSlug}-video.mp4`);
-  const renderOutput: VideoRenderOutput = await renderMarketingVideo({
-    campaignSlug,
-    scenes: adjustedScenes,
-    audioPath: mixedAudio.mixedAudioPath,
-    ratio,
-    outputPath: videoOutputPath,
-    brandName,
-  });
+
+  let renderOutput: VideoRenderOutput;
+  try {
+    const beatManifest: CampaignBeatManifest = Array.isArray(input.beats) && input.beats.length > 0
+      ? {
+          campaignSlug,
+          targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : 60,
+          styleTheme: "retro_tech_newspaper",
+          beats: input.beats.map((b, idx) => ({
+            ...b,
+            imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
+          })),
+        }
+      : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
+
+    const motionResult = await renderBeatMotionVideo({
+      manifest: beatManifest,
+      audioPath: mixedAudio.mixedAudioPath,
+      outputPath: videoOutputPath,
+      fps: 30,
+      width: ratio === "16:9" ? 1920 : 1080,
+      height: ratio === "16:9" ? 1080 : 1920,
+    });
+
+    renderOutput = {
+      videoPath: motionResult.videoPath,
+      width: motionResult.width,
+      height: motionResult.height,
+      durationSeconds: motionResult.durationSeconds,
+      bytes: motionResult.bytes,
+      fps: 30,
+    };
+  } catch (error) {
+    console.warn("[studio] Beat motion rendering fallback to legacy compiler:", error);
+    renderOutput = await renderMarketingVideo({
+      campaignSlug,
+      scenes: adjustedScenes,
+      audioPath: mixedAudio.mixedAudioPath,
+      ratio,
+      outputPath: videoOutputPath,
+      brandName,
+    });
+  }
 
   const narrationSeconds = Math.round(speechOutput.durationMs / 100) / 10;
   const narrationGap = requestedDurationMs > 0 && speechOutput.durationMs < requestedDurationMs * 0.9

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { assessMarketingBrief, type MarketingBriefInput } from "./brief.ts";
-import { createCampaignStore } from "./campaign-store.ts";
+import { CampaignStoreError, createCampaignStore } from "./campaign-store.ts";
 import { renderApprovedCampaign } from "./campaign-workflow.ts";
 import { routeMarketingIntent } from "./intent.ts";
 import { createPublisherGateway, type PublishPlatform } from "./publisher-gateway.ts";
@@ -43,7 +43,7 @@ const TOOLS = [
   },
   {
     name: "prepare_marketing_campaign",
-    description: "Validate the marketing brief. Missing decisions return consultation questions and create no campaign.",
+    description: "Validate the marketing brief. A complete brief remains blocked until the exact nextAction approval tool call succeeds; do not delegate production before approval.",
     inputSchema: {
       type: "object",
       properties: {
@@ -61,36 +61,47 @@ const TOOLS = [
   },
   {
     name: "approve_marketing_campaign",
-    description: "Approve exactly the reviewed campaign revision before production starts.",
+    description: "Approve exactly the reviewed campaign revision before production starts. Use the campaignId and revision returned by prepare_marketing_campaign, never an assignment, request, or thread ID.",
     inputSchema: {
       type: "object",
-      properties: { campaignId: { type: "string" }, revision: { type: "number" } },
+      properties: {
+        campaignId: {
+          type: "string",
+          description: "Campaign slug ID returned by prepare_marketing_campaign (e.g. 'keychron-q1'). Never an assignment, request, or thread ID.",
+        },
+        revision: { type: "number" },
+      },
       required: ["campaignId", "revision"],
     },
   },
   {
     name: "get_marketing_campaign",
-    description: "Read the exact campaign lifecycle and artifact manifest by ID.",
+    description: "Read the exact campaign lifecycle and artifact manifest by campaign slug ID (e.g. 'keychron-q1'). Returns found: false if the campaign does not exist. Never pass a request ID, thread ID, or UUID.",
     inputSchema: {
       type: "object",
-      properties: { campaignId: { type: "string" } },
+      properties: {
+        campaignId: {
+          type: "string",
+          description: "Campaign slug ID returned by prepare_marketing_campaign (e.g. 'keychron-q1'). Must not be a UUID, thread ID, or request ID.",
+        },
+      },
       required: ["campaignId"],
     },
   },
   {
     name: "generate_marketing_images",
     description:
-      "Generate 1 to 4 high-quality 1408x768 product or lifestyle marketing images using Google AI Studio (Nano Banana 2 Lite / gemini-3.1-flash-lite-image, with multi-turn product consistency) and save them as local .jpg files for chat preview and social upload.",
+      "Generate 1 to 12 high-quality marketing or beat keyframe images using Google AI Studio (Nano Banana 2 Lite / gemini-3.1-flash-lite-image, with multi-turn product consistency) and save them as local .jpg files for chat preview and social upload.",
     inputSchema: {
       type: "object",
       properties: {
         campaignId: {
           type: "string",
-          description: "Approved campaign ID.",
+          description: "Approved campaign slug ID (e.g. 'keychron-q1'). Must not be a UUID, thread ID, or request ID.",
         },
         prompts: {
           type: "array",
-          description: "List of 1 to 4 detailed English visual prompts for Flux image generation.",
+          description: "List of 1 to 12 detailed English visual prompts for image generation corresponding to video beats.",
           items: {
             type: "object",
             properties: {
@@ -115,13 +126,13 @@ const TOOLS = [
   {
     name: "generate_marketing_video",
     description:
-      "Generate a high-converting HTML-based marketing video (9:16 portrait or 16:9 landscape) powered by Google AI Studio Speech, royalty-free BGM with audio ducking, Ken Burns photo zoom, and kinetic animated scenes.",
+      "Generate a high-converting marketing video (9:16 portrait or 16:9 landscape) powered by Google AI Studio Speech, royalty-free BGM with audio ducking, native 2.5D camera motion, and kinetic ASS subtitles.",
     inputSchema: {
       type: "object",
       properties: {
         campaignId: {
           type: "string",
-          description: "Approved campaign ID whose assets are ready.",
+          description: "Approved campaign slug ID (e.g. 'keychron-q1') whose assets are ready. Must not be a UUID, thread ID, or request ID.",
         },
         campaignSlug: {
           type: "string",
@@ -130,6 +141,26 @@ const TOOLS = [
         script: {
           type: "string",
           description: "Full voiceover narration script for Google AI Studio Speech synthesis.",
+        },
+        beats: {
+          type: "array",
+          description: "List of 8 to 12 narrative beats (3 to 5 seconds each) with voiceover narration, visualPrompt, and cameraMotion.",
+          items: {
+            type: "object",
+            properties: {
+              beatIndex: { type: "number" },
+              durationEstimateMs: { type: "number" },
+              narration: { type: "string" },
+              visualPrompt: { type: "string" },
+              cameraMotion: {
+                type: "string",
+                enum: ["slow_zoom_in", "slow_zoom_out", "punch_in", "pan_left", "pan_right", "static_drift"],
+              },
+              keywordHighlight: { type: "string" },
+              imagePath: { type: "string" },
+            },
+            required: ["beatIndex", "narration", "visualPrompt"],
+          },
         },
         scenes: {
           type: "array",
@@ -256,6 +287,46 @@ function send(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+function findLatestCampaign(assetsRoot: string): string | null {
+  try {
+    if (!existsSync(assetsRoot)) return null;
+    const entries = readdirSync(assetsRoot, { withFileTypes: true });
+    let latest: { id: string; mtime: number } | null = null;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const manifest = join(assetsRoot, entry.name, "campaign.json");
+      if (!existsSync(manifest)) continue;
+      try {
+        const stat = statSync(manifest);
+        const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { id?: string };
+        if (parsed.id && (!latest || stat.mtimeMs > latest.mtime)) {
+          latest = { id: parsed.id, mtime: stat.mtimeMs };
+        }
+      } catch {
+        continue;
+      }
+    }
+    return latest?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveCampaignId(assetsRoot: string, rawId: string): string {
+  let trimmed = rawId.trim();
+  if (trimmed.startsWith("CAMPAIGN_ID:")) {
+    trimmed = trimmed.slice("CAMPAIGN_ID:".length).trim();
+  }
+  trimmed = trimmed.replace(/^[:\s<]+|[:\s>]+$/g, "");
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+  const isPlaceholder = !trimmed || trimmed === "campaign.id" || trimmed === "campaign-id" || trimmed === "id" || trimmed === "undefined" || trimmed === "null";
+  if (isUuid || isPlaceholder) {
+    const latest = findLatestCampaign(assetsRoot);
+    if (latest) return latest;
+  }
+  return trimmed;
+}
+
 async function handleCall(name: string, args: Record<string, unknown>) {
   if (name === "route_marketing_request") {
     return {
@@ -274,21 +345,67 @@ async function handleCall(name: string, args: Record<string, unknown>) {
       };
     }
     const campaign = CAMPAIGNS.prepare(String(args.campaignSlug ?? ""), assessment.brief);
-    return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ...campaign,
+          approvalRequired: true,
+          productionBlocked: true,
+          nextAction: {
+            tool: "approve_marketing_campaign",
+            arguments: { campaignId: campaign.id, revision: campaign.revision },
+          },
+        }, null, 2),
+      }],
+    };
   }
 
   if (name === "approve_marketing_campaign") {
-    const campaign = CAMPAIGNS.approve(String(args.campaignId ?? ""), Number(args.revision));
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    const existing = CAMPAIGNS.get(campaignId);
+    if (existing.status === "approved" || existing.status === "scripting" || existing.status === "assets_ready") {
+      return { content: [{ type: "text", text: JSON.stringify(existing, null, 2) }] };
+    }
+    const revision = Number.isFinite(Number(args.revision)) ? Number(args.revision) : existing.revision;
+    const campaign = CAMPAIGNS.approve(campaignId, revision);
     return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
   }
 
   if (name === "get_marketing_campaign") {
-    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
-    return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    try {
+      const campaign = CAMPAIGNS.get(campaignId);
+      return { content: [{ type: "text", text: JSON.stringify({ found: true, ...campaign }, null, 2) }] };
+    } catch (error) {
+      if (error instanceof CampaignStoreError) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  found: false,
+                  campaignId,
+                  message: error.message,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      throw error;
+    }
   }
 
   if (name === "generate_marketing_images") {
-    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    const campaign = CAMPAIGNS.get(campaignId);
     if (campaign.status !== "approved" && campaign.status !== "scripting" && campaign.status !== "assets_ready") {
       throw new Error(`Campaign must be approved before image generation; current status is ${campaign.status}`);
     }
@@ -369,13 +486,17 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "generate_marketing_video") {
-    const campaignId = String(args.campaignId ?? "");
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
     const targetDurationSeconds = Number(args.targetDurationSeconds);
     if (!Number.isFinite(targetDurationSeconds) || targetDurationSeconds <= 0) {
       throw new Error("targetDurationSeconds must be a positive number");
     }
+    const campaign = CAMPAIGNS.get(campaignId);
     const input = {
       ...(args as unknown as GenerateMarketingVideoInput),
+      campaignId,
+      campaignSlug: campaign.slug,
       targetDurationSeconds,
     };
     const output = await renderApprovedCampaign(
@@ -395,7 +516,9 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "resolve_marketing_artifact") {
-    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    const campaign = CAMPAIGNS.get(campaignId);
     const type = String(args.type ?? "");
     const artifact = type === "video"
       ? CAMPAIGNS.resolveLatestReadyVideo(campaign.id)
@@ -410,7 +533,9 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "publish_marketing_artifact") {
-    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    const campaign = CAMPAIGNS.get(campaignId);
     const artifactId = String(args.artifactId ?? "");
     const artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId && candidate.type === "video");
     if (!artifact || !existsSync(artifact.path)) throw new Error(`Ready video artifact not found: ${artifactId}`);
@@ -440,8 +565,10 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "save_marketing_draft") {
+    const rawSlug = String(args.campaignSlug ?? "").trim();
+    const campaignSlug = resolveCampaignId(ASSETS_ROOT, rawSlug) || "campaign";
     const draft = await saveMarketingDraft(ASSETS_ROOT, {
-      campaignSlug: String(args.campaignSlug ?? "campaign"),
+      campaignSlug,
       productName: String(args.productName ?? ""),
       targetPlatforms: Array.isArray(args.targetPlatforms) ? args.targetPlatforms.map(String) : [],
       posts: (Array.isArray(args.posts) ? args.posts : []) as MarketingPostDraft[],
@@ -452,7 +579,9 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "get_marketing_draft") {
-    const draft = await getMarketingDraft(ASSETS_ROOT, String(args.campaignSlug ?? ""));
+    const rawSlug = String(args.campaignSlug ?? "").trim();
+    const campaignSlug = resolveCampaignId(ASSETS_ROOT, rawSlug);
+    const draft = await getMarketingDraft(ASSETS_ROOT, campaignSlug);
     return {
       content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
     };
