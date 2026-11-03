@@ -9,15 +9,18 @@ describe("RoMes marketing swarm team file", () => {
     const team = loadTeamFile(fileURLToPath(new URL("./team.yaml", import.meta.url)));
     const byName = new Map(team.bots.map((bot) => [bot.name, bot]));
     expect(byName.get("RoMes")).toMatchObject({ chief: true, manages: ["Marketing"] });
-    expect(byName.get("Poppy")?.tools).toEqual({ allow: [] });
+    for (const bot of team.bots) expect(bot.tools?.allow).toContain("native:*");
+    expect(byName.get("Poppy")?.tools).toEqual({ allow: ["native:*"] });
     expect(byName.get("Finch")?.tools).toEqual({
       allow: [
+        "native:*",
         "mcp:marketing_studio:get_marketing_campaign",
         "mcp:marketing_studio:generate_marketing_images",
       ],
     });
     expect(byName.get("Momo")?.tools).toEqual({
       allow: [
+        "native:*",
         "mcp:marketing_studio:get_marketing_campaign",
         "mcp:marketing_studio:generate_marketing_video",
       ],

@@ -11,6 +11,7 @@ bots:
     soul: { file: romes.md }
     tools:
       allow:
+        - native:*
         - mcp:agents:coordinate_bots
         - mcp:agents:attach_file
         - mcp:marketing_studio:route_marketing_request
@@ -24,13 +25,14 @@ bots:
     team: Marketing
     computer: off
     soul: { file: poppy.md }
-    tools: { allow: [] }
+    tools: { allow: ["native:*"] }
   - name: Finch
     team: Marketing
     computer: off
     soul: { file: finch.md }
     tools:
       allow:
+        - native:*
         - mcp:marketing_studio:get_marketing_campaign
         - mcp:marketing_studio:generate_marketing_images
   - name: Momo
@@ -39,5 +41,6 @@ bots:
     soul: { file: momo.md }
     tools:
       allow:
+        - native:*
         - mcp:marketing_studio:get_marketing_campaign
         - mcp:marketing_studio:generate_marketing_video
