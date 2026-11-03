@@ -1,6 +1,6 @@
 import React from "react";
 import { spring, useCurrentFrame, useVideoConfig } from "remotion";
-import { parseSubtitleWords, type SubtitleToken } from "./subtitles.ts";
+import { captionWindow, parseSubtitleWords, type SubtitleToken } from "./subtitles.ts";
 
 export { parseSubtitleWords, type SubtitleToken };
 
@@ -10,6 +10,7 @@ export const KineticCaptions: React.FC<{ text: string; isVertical: boolean }> = 
 
   const tokens = React.useMemo(() => parseSubtitleWords(text, durationInFrames), [text, durationInFrames]);
   if (tokens.length === 0) return null;
+  const visible = captionWindow(tokens, frame);
 
   return (
     <div
@@ -32,7 +33,7 @@ export const KineticCaptions: React.FC<{ text: string; isVertical: boolean }> = 
         zIndex: 50,
       }}
     >
-      {tokens.map((token, i) => {
+      {visible.map((token, i) => {
         const isActive = frame >= token.startFrame && frame < token.endFrame;
         const hasPassed = frame >= token.endFrame;
 

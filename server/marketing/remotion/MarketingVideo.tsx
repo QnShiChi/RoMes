@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Sequence, useVideoConfig } from "remotion";
+import { resolveSceneLayouts } from "./layout.ts";
 import { Scene } from "./Scene.tsx";
 import type { RemotionVideoProps } from "./types.ts";
 
@@ -10,6 +11,7 @@ export const MarketingVideo: React.FC<RemotionVideoProps> = ({
 }) => {
   const { fps } = useVideoConfig();
 
+  const layouts = resolveSceneLayouts(scenes);
   let accumulatedFrames = 0;
 
   return (
@@ -25,10 +27,11 @@ export const MarketingVideo: React.FC<RemotionVideoProps> = ({
             key={idx}
             from={from}
             durationInFrames={durationInFrames}
-            name={`Scene-${idx + 1}-${scene.type}`}
+            name={`Scene-${idx + 1}-${layouts[idx]}`}
           >
             <Scene
               scene={scene}
+              layout={layouts[idx]!}
               brandName={brandName}
               durationInFrames={durationInFrames}
               ratio={ratio}

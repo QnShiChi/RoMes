@@ -15,6 +15,7 @@ export interface AudioMixInput {
   voiceVolume?: number;
   bgmVolume?: number;
   enableDucking?: boolean;
+  targetDurationMs?: number;
 }
 
 export interface AudioMixOutput {
@@ -87,15 +88,25 @@ export async function mixCampaignAudio(
     };
   }
 
+  const voiceDurationMs = probeAudioDurationMs(input.voicePath);
+  const desiredDurationMs = Math.max(voiceDurationMs, input.targetDurationMs ?? 0);
+  const padSec = desiredDurationMs > 0 ? Math.max(1, Math.ceil(desiredDurationMs / 1000)) : 0;
+  const padFilter = padSec > 0 ? `,apad=whole_dur=${padSec}` : "";
+
   if (!hasBgm) {
-    execFileSync("ffmpeg", ["-y", "-i", input.voicePath, "-c:a", "libmp3lame", input.outputPath], {
+    const args = ["-y", "-i", input.voicePath];
+    if (padSec > 0) {
+      args.push("-af", `apad=whole_dur=${padSec}`);
+    }
+    args.push("-c:a", "libmp3lame", input.outputPath);
+    execFileSync("ffmpeg", args, {
       timeout: 30_000,
       stdio: "pipe",
     });
   } else if (enableDucking) {
     const filterComplex =
       `[1:a]volume=${bgmVolume}[bgm_raw];` +
-      `[0:a]volume=${voiceVolume},asplit=2[voice_mix][voice_sc];` +
+      `[0:a]volume=${voiceVolume}${padFilter},asplit=2[voice_mix][voice_sc];` +
       `[bgm_raw][voice_sc]sidechaincompress=threshold=0.08:ratio=6:attack=15:release=300[ducked_bgm];` +
       `[voice_mix][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]`;
 
@@ -124,7 +135,7 @@ export async function mixCampaignAudio(
   } else {
     const filterComplex =
       `[1:a]volume=${bgmVolume}[bgm];` +
-      `[0:a]volume=${voiceVolume}[voice];` +
+      `[0:a]volume=${voiceVolume}${padFilter}[voice];` +
       `[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]`;
 
     execFileSync(

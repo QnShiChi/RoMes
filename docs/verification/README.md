@@ -144,6 +144,11 @@ bot's turn getting the `postiz` tools with the token kept out of every answer,
 transcript and log, plain refusals, revocation and disconnect, against loopback
 stand-ins for Postiz.
 
+The [marketing swarm fixture](marketing-swarm.md) checks consultation,
+campaign approval, artifact reuse, and truthful publishing refusal against a
+temporary assets root and fake engine. It never touches a person's bots or
+social accounts.
+
 The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
 included calls with the month's use, the person's own treg key (saved, tested,
 removed, used first) and a used-up month, against loopback stand-ins for treg

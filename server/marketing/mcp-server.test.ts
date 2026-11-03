@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -26,7 +26,7 @@ describe("marketing studio MCP server", () => {
     }
   });
 
-  it("answers initialize, tools/list, and executes generate_marketing_images and draft tools", async () => {
+  it("enforces consultation, approval, artifact reuse, and truthful publishing", async () => {
     const assetsRoot = mkdtempSync(join(tmpdir(), "omb-mcp-marketing-"));
     dirs.push(assetsRoot);
 
@@ -62,19 +62,73 @@ describe("marketing studio MCP server", () => {
     expect(init.result.serverInfo.name).toBe("marketing_studio");
 
     const listed = await rpc(2, "tools/list", {});
-    expect(listed.result.tools.map((t: { name: string }) => t.name)).toEqual([
+    const names = listed.result.tools.map((t: { name: string }) => t.name);
+    expect(names).toEqual([
+      "route_marketing_request",
+      "prepare_marketing_campaign",
+      "approve_marketing_campaign",
+      "get_marketing_campaign",
       "generate_marketing_images",
       "generate_marketing_video",
+      "resolve_marketing_artifact",
+      "get_marketing_publish_capabilities",
+      "publish_marketing_artifact",
       "save_marketing_draft",
       "get_marketing_draft",
-      "mark_marketing_published",
-      "publish_post",
     ]);
+    expect(names).not.toContain("mark_marketing_published");
 
-    const generated = await rpc(3, "tools/call", {
-      name: "generate_marketing_images",
+    const routed = await rpc(3, "tools/call", {
+      name: "route_marketing_request",
+      arguments: { message: "up video vừa rồi lên TikTok" },
+    });
+    expect(JSON.parse(routed.result.content[0].text)).toMatchObject({ intent: "publish", confidence: "high" });
+
+    const incomplete = await rpc(4, "tools/call", {
+      name: "prepare_marketing_campaign",
+      arguments: { campaignSlug: "keychron-q1", topic: "Keychron Q1" },
+    });
+    expect(JSON.parse(incomplete.result.content[0].text)).toMatchObject({
+      needsConsultation: true,
+      missingFields: expect.arrayContaining(["goal", "targetDurationSeconds"]),
+    });
+
+    const prepared = await rpc(5, "tools/call", {
+      name: "prepare_marketing_campaign",
       arguments: {
         campaignSlug: "keychron-q1",
+        topic: "Keychron Q1 Pro",
+        goal: "lead generation",
+        audience: "mechanical keyboard enthusiasts",
+        platform: "TikTok",
+        style: "modern tech",
+        targetDurationSeconds: 2,
+        callToAction: "Đăng ký nhận ưu đãi",
+      },
+    });
+    const campaign = JSON.parse(prepared.result.content[0].text);
+    expect(campaign).toMatchObject({ id: "keychron-q1", status: "needs_brief", revision: 1 });
+
+    const blockedImages = await rpc(6, "tools/call", {
+      name: "generate_marketing_images",
+      arguments: {
+        campaignId: campaign.id,
+        prompts: [{ prompt: "mechanical keyboard studio lighting", label: "Hero Banner" }],
+      },
+    });
+    expect(blockedImages.result.isError).toBe(true);
+    expect(blockedImages.result.content[0].text).toMatch(/approved/i);
+
+    const approved = await rpc(7, "tools/call", {
+      name: "approve_marketing_campaign",
+      arguments: { campaignId: campaign.id, revision: campaign.revision },
+    });
+    expect(JSON.parse(approved.result.content[0].text).status).toBe("approved");
+
+    const generated = await rpc(8, "tools/call", {
+      name: "generate_marketing_images",
+      arguments: {
+        campaignId: campaign.id,
         prompts: [{ prompt: "mechanical keyboard studio lighting", label: "Hero Banner" }],
       },
     });
@@ -83,7 +137,13 @@ describe("marketing studio MCP server", () => {
     expect(parsedGen.images).toHaveLength(1);
     expect(parsedGen.images[0].filePath).toContain("keychron-q1");
 
-    const saved = await rpc(4, "tools/call", {
+    const campaignWithAssets = await rpc(9, "tools/call", {
+      name: "get_marketing_campaign",
+      arguments: { campaignId: campaign.id },
+    });
+    expect(JSON.parse(campaignWithAssets.result.content[0].text).status).toBe("assets_ready");
+
+    const saved = await rpc(10, "tools/call", {
       name: "save_marketing_draft",
       arguments: {
         campaignSlug: "keychron-q1",
@@ -100,32 +160,35 @@ describe("marketing studio MCP server", () => {
     });
     expect(saved.result.isError).toBeUndefined();
 
-    const loaded = await rpc(5, "tools/call", {
+    const loaded = await rpc(11, "tools/call", {
       name: "get_marketing_draft",
       arguments: { campaignSlug: "keychron-q1" },
     });
     expect(JSON.parse(loaded.result.content[0].text).productName).toBe("Keychron Q1 Pro");
 
-    const videoCall = await rpc(6, "tools/call", {
+    const videoArguments = {
+      campaignId: campaign.id,
+      campaignSlug: "keychron-q1",
+      script: "Trải nghiệm gõ phím tuyệt vời cùng Keychron Q1 Pro.",
+      scenes: [
+        {
+          type: "hook",
+          title: "Đỉnh cao bàn phím cơ",
+          durationMs: 1000,
+        },
+        {
+          type: "cta",
+          title: "Mua ngay hôm nay",
+          durationMs: 1000,
+        },
+      ],
+      ratio: "16:9",
+      bgmTheme: "tech",
+      targetDurationSeconds: 2,
+    };
+    const videoCall = await rpc(12, "tools/call", {
       name: "generate_marketing_video",
-      arguments: {
-        campaignSlug: "keychron-q1",
-        script: "Trải nghiệm gõ phím tuyệt vời cùng Keychron Q1 Pro.",
-        scenes: [
-          {
-            type: "hook",
-            title: "Đỉnh cao bàn phím cơ",
-            durationMs: 1000,
-          },
-          {
-            type: "cta",
-            title: "Mua ngay hôm nay",
-            durationMs: 1000,
-          },
-        ],
-        ratio: "16:9",
-        bgmTheme: "tech",
-      },
+      arguments: videoArguments,
     });
     expect(videoCall.result.isError).toBeUndefined();
     const videoResult = JSON.parse(videoCall.result.content[0].text);
@@ -133,23 +196,51 @@ describe("marketing studio MCP server", () => {
     expect(videoResult.width).toBe(1920);
     expect(videoResult.height).toBe(1080);
     expect(videoResult.ratio).toBe("16:9");
+    expect(videoResult.reused).toBe(false);
 
-    const sampleVideoPath = join(assetsRoot, "dummy-video.mp4");
-    writeFileSync(sampleVideoPath, "fake-mp4-data");
+    const reusedCall = await rpc(13, "tools/call", {
+      name: "generate_marketing_video",
+      arguments: videoArguments,
+    });
+    const reused = JSON.parse(reusedCall.result.content[0].text);
+    expect(reused).toMatchObject({ reused: true, artifactId: videoResult.artifactId });
 
-    const publishCall = await rpc(7, "tools/call", {
-      name: "publish_post",
+    const resolved = await rpc(14, "tools/call", {
+      name: "resolve_marketing_artifact",
+      arguments: { campaignId: campaign.id, type: "video" },
+    });
+    expect(JSON.parse(resolved.result.content[0].text)).toMatchObject({ id: videoResult.artifactId, path: videoResult.videoPath });
+
+    const capabilities = await rpc(15, "tools/call", {
+      name: "get_marketing_publish_capabilities",
+      arguments: {},
+    });
+    expect(JSON.parse(capabilities.result.content[0].text)).toEqual({ capabilities: [] });
+
+    const publishTool = listed.result.tools.find((tool: { name: string }) => tool.name === "publish_marketing_artifact");
+    expect(publishTool.inputSchema.properties).not.toHaveProperty("url");
+    expect(publishTool.inputSchema.properties).not.toHaveProperty("status");
+
+    const publish = await rpc(16, "tools/call", {
+      name: "publish_marketing_artifact",
       arguments: {
+        campaignId: campaign.id,
+        artifactId: videoResult.artifactId,
         platform: "tiktok",
-        videoPath: sampleVideoPath,
-        caption: "Bàn phím cơ đỉnh cao",
-        hashtags: ["Keychron", "Tech"],
+        caption: "Keychron Q1 Pro",
+        idempotencyKey: "publish-1",
       },
     });
-    expect(publishCall.result.isError).toBeUndefined();
-    const publishResult = JSON.parse(publishCall.result.content[0].text);
-    expect(publishResult.success).toBe(true);
-    expect(publishResult.platform).toBe("tiktok");
-    expect(publishResult.url).toContain("tiktok.com");
+    expect(JSON.parse(publish.result.content[0].text)).toMatchObject({
+      published: false,
+      reason: "no_configured_publisher",
+      artifact: { id: videoResult.artifactId, path: videoResult.videoPath },
+    });
+
+    const finalCampaign = await rpc(17, "tools/call", {
+      name: "get_marketing_campaign",
+      arguments: { campaignId: campaign.id },
+    });
+    expect(JSON.parse(finalCampaign.result.content[0].text).status).toBe("ready");
   }, 60_000);
 });

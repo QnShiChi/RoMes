@@ -10,7 +10,15 @@ export type ContextualAnimationType =
   | "growth"
   | "default";
 
-export type MarketingSceneType = "hook" | "product" | "features" | "cta";
+export type MarketingSceneType =
+  | "hook"
+  | "problem"
+  | "split"
+  | "stats"
+  | "features"
+  | "product"
+  | "quote"
+  | "cta";
 
 export interface MarketingSceneSpec {
   type: MarketingSceneType;
@@ -62,9 +70,9 @@ export function resolveImageSource(imagePath?: string): string {
       return `data:${mime};base64,${b64}`;
     }
   } catch {
-    // Ignore file read error and return path
+    // Ignore file read error and fall through
   }
-  return imagePath;
+  return "";
 }
 
 export function buildMarketingSceneHtml(
@@ -91,7 +99,7 @@ export function buildMarketingSceneHtml(
     }
 
     case "product": {
-      const imgSrc = resolveImageSource(scene.imagePath);
+      const imgSrc = resolveImageSource(scene.imagePath) || scene.imagePath || "";
       const imgTag = scene.imagePath
         ? `<div class="image-wrapper ken-burns">
             <img src="${escapeHtml(imgSrc)}" alt="${title}" />
@@ -110,6 +118,10 @@ export function buildMarketingSceneHtml(
       break;
     }
 
+    case "problem":
+    case "split":
+    case "stats":
+    case "quote":
     case "features": {
       const bullets = (scene.bulletPoints || [])
         .map(

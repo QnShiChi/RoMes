@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -54,13 +54,6 @@ export interface MarketingPostDraft {
   imagePaths: string[];
 }
 
-export interface PublishedPlatformResult {
-  platform: string;
-  status: "published" | "failed";
-  url?: string;
-  note?: string;
-}
-
 export interface MarketingDraft {
   campaignSlug: string;
   productName: string;
@@ -69,7 +62,6 @@ export interface MarketingDraft {
   createdAt: string;
   updatedAt: string;
   posts: MarketingPostDraft[];
-  publishedResults?: PublishedPlatformResult[];
 }
 
 export interface SaveDraftInput {
@@ -77,11 +69,6 @@ export interface SaveDraftInput {
   productName: string;
   targetPlatforms: string[];
   posts: MarketingPostDraft[];
-}
-
-export interface MarkPublishedInput {
-  campaignSlug: string;
-  results: PublishedPlatformResult[];
 }
 
 const DEFAULT_BASE_URL = "https://image.pollinations.ai/prompt";
@@ -306,13 +293,27 @@ const TOPIC_CONCEPT_MAP: Array<{ patterns: RegExp; english: string }> = [
   { patterns: /\b(cybersecurity|cyber|security|privacy|bao mat|an toan|ma hoa|shield|khoa)\b/i, english: "cybersecurity network data security" },
   { patterns: /\b(email|thu tin|gui tu dong|automation)\b/i, english: "email automation business computer" },
   { patterns: /\b(data center|trung tam du lieu|gpu|sieu cum|ha tang|server)\b/i, english: "data center server gpu" },
-  { patterns: /\b(ban co|quan co|chien luoc|phong hop|hologram|boardroom)\b/i, english: "business strategy technology futuristic" },
+  { patterns: /\b(ai agent|agents|multi-agent|collaborat\w*|phoi hop|autonomous|swarm)\b/i, english: "artificial intelligence hologram digital network office" },
+  { patterns: /\b(chuyen doi so|digital transformation|cong nghe so|so hoa)\b/i, english: "digital transformation modern technology office" },
+  { patterns: /\b(ban co|quan co|chien luoc|phong hop|hologram|boardroom|opportunities|risks)\b/i, english: "business strategy technology futuristic" },
   { patterns: /\b(cloud|dam may|du lieu|mang luoi|network)\b/i, english: "cloud computing big data network" },
-  { patterns: /\b(phone|smartphone|laptop|thiet bi|tro ly|dien thoai)\b/i, english: "smartphone laptop artificial intelligence" },
+  { patterns: /\b(phone|smartphone|laptop|thiet bi|tro ly|assistant|interface|dien thoai)\b/i, english: "smartphone laptop artificial intelligence" },
   { patterns: /\b(big tech|facebook|microsoft|google|apple|openai|meta)\b/i, english: "artificial intelligence corporate technology" },
-  { patterns: /\b(con duong|tuong lai|anh sang|kham pha|chan troi|cta)\b/i, english: "futuristic technology digital innovation" },
+  { patterns: /\b(doanh nghiep|business|enterprise|professionals|employees|workspace|office|cong ty)\b/i, english: "modern tech office business analytics" },
+  { patterns: /\b(con duong|tuong lai|anh sang|kham pha|chan troi|cta|embracing)\b/i, english: "futuristic technology digital innovation" },
   { patterns: /\b(robot|nguoi may|co khi|tu dong hoa)\b/i, english: "ai robot modern technology" },
 ];
+
+const PROMPT_STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "into",
+  "about", "as", "is", "are", "was", "were", "be", "been", "being", "that", "this", "these", "those", "their",
+  "its", "scene", "showing", "depicting", "representation", "dynamic", "split", "screen", "side", "one", "other",
+  "positive", "negative", "outcomes", "potential", "pitfalls", "opportunities", "risks", "dramatic", "lighting",
+  "contrasting", "atmosphere", "modern", "sleek", "warm", "inviting", "vibrant", "colors", "energetic", "hopeful",
+  "various", "tasks", "simultaneously", "environment", "concept", "visual", "illustration", "image", "photo",
+  "photograph", "view", "shot", "angle", "style", "background", "foreground", "high", "quality", "resolution",
+  "aspect", "ratio", "vertical", "portrait", "bright", "setting", "group", "diverse", "interacting", "displaying",
+]);
 
 export function extractKeywordsForSearch(prompt: string): string {
   const normalized = stripDiacritics(prompt).toLowerCase();
@@ -336,9 +337,21 @@ export function extractKeywordsForSearch(prompt: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  const tokens = cleaned.split(" ").filter((w) => w.length > 2);
-  if (tokens.length === 0) return "technology artificial intelligence business";
-  return tokens.slice(0, 5).join(" ");
+  const rawTokens = cleaned
+    .split(" ")
+    .filter((w) => (w.length > 2 || w === "ai" || w === "vr" || w === "ar" || w === "3d") && !PROMPT_STOPWORDS.has(w));
+
+  const expandedTokens: string[] = [];
+  for (const token of rawTokens) {
+    if (token === "ai") {
+      expandedTokens.push("artificial", "intelligence");
+    } else {
+      expandedTokens.push(token);
+    }
+  }
+
+  if (expandedTokens.length === 0) return "technology artificial intelligence business";
+  return expandedTokens.slice(0, 5).join(" ");
 }
 
 export async function fetchFromUnsplash(
@@ -645,24 +658,6 @@ export async function getMarketingDraft(
   };
 }
 
-export async function markMarketingPublished(
-  assetsRoot: string,
-  input: MarkPublishedInput,
-): Promise<MarketingDraft> {
-  const draft = await getMarketingDraft(assetsRoot, input.campaignSlug);
-  const campaignDir = join(assetsRoot, draft.campaignSlug);
-  mkdirSync(campaignDir, { recursive: true });
-  const updated: MarketingDraft = {
-    ...draft,
-    status: "published",
-    updatedAt: new Date().toISOString(),
-    publishedResults: input.results,
-  };
-  const draftPath = join(campaignDir, "draft.json");
-  writeFileSync(draftPath, JSON.stringify(updated, null, 2), "utf8");
-  return updated;
-}
-
 export interface GenerateMarketingVideoInput {
   campaignSlug: string;
   script: string;
@@ -671,6 +666,7 @@ export interface GenerateMarketingVideoInput {
   bgmTheme?: BgmTheme;
   voice?: string;
   brandName?: string;
+  targetDurationSeconds?: number;
 }
 
 export interface GenerateMarketingVideoOutput {
@@ -681,16 +677,184 @@ export interface GenerateMarketingVideoOutput {
   width: number;
   height: number;
   durationSeconds: number;
+  narrationSeconds: number;
   bytes: number;
   ratio: VideoRatio;
   nextStepHint: string;
+}
+
+export function findDiscoveredCampaignImages(assetsRoot: string, preferredSlug?: string): string[] {
+  try {
+    if (!existsSync(assetsRoot)) return [];
+    const entries = readdirSync(assetsRoot, { withFileTypes: true });
+    const slugTokens = (preferredSlug || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 2);
+
+    interface CandidateDir {
+      name: string;
+      fullPath: string;
+      mtime: number;
+      score: number;
+    }
+
+    const candidateDirs: CandidateDir[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const fullPath = join(assetsRoot, entry.name);
+      try {
+        const stat = statSync(fullPath);
+        const nameLower = entry.name.toLowerCase();
+
+        let score = 0;
+        for (const token of slugTokens) {
+          if (nameLower.includes(token)) score += 10;
+        }
+        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours < 2) {
+          score += 5;
+        }
+
+        candidateDirs.push({
+          name: entry.name,
+          fullPath,
+          mtime: stat.mtimeMs,
+          score,
+        });
+      } catch {}
+    }
+
+    candidateDirs.sort((a, b) => b.score - a.score || b.mtime - a.mtime);
+
+    for (const dir of candidateDirs) {
+      try {
+        const files = readdirSync(dir.fullPath);
+        const imageFiles = files
+          .filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f) && !f.startsWith("."))
+          .sort((a, b) => {
+            const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+            const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+            return numA - numB || a.localeCompare(b);
+          })
+          .map((f) => join(dir.fullPath, f));
+
+        if (imageFiles.length > 0) {
+          return imageFiles;
+        }
+      } catch {}
+    }
+  } catch {}
+  return [];
+}
+
+export function sanitizeVoiceoverScript(script: string, scenes?: MarketingSceneSpec[]): string {
+  let text = (script || "").trim();
+
+  const voMatch = text.match(
+    /(?:^|\n)[^\n]*(?:LỜI BÌNH|VOICEOVER|KỊCH BẢN THUYẾT MINH|NARRATION)[^\n]*\n+([\s\S]+?)(?=(?:\n[^\n]*(?:PHÂN CẢNH|SCENES?|THÔNG TIN HÌNH|DANH SÁCH CẢNH|PHẦN 2)|\n#{1,3}\s|$))/i,
+  );
+  if (voMatch && voMatch[1].trim().length > 20) {
+    text = voMatch[1].trim();
+  } else {
+    const storyboardCutoff = text.search(
+      /(?:^|\n)[^\n]*(?:PHÂN CẢNH|SCENES?|STORYBOARD|DANH SÁCH CẢNH|PHẦN 2)/i,
+    );
+    if (storyboardCutoff > 0) {
+      text = text.slice(0, storyboardCutoff).trim();
+    }
+  }
+
+  text = text.replace(/```[\s\S]*?```/g, " ");
+  text = text.replace(/^#{1,6}\s+.*$/gm, " ");
+  text = text.replace(/\*\*([^*]+)\*\*/g, "$1");
+  text = text.replace(/\*([^*]+)\*/g, "$1");
+  text = text.replace(/__([^_]+)__/g, "$1");
+  text = text.replace(/_([^_]+)_/g, "$1");
+  text = text.replace(/(?:^|\n)\s*(?:Cảnh|Scene|Phân cảnh)\s*\d+[^:\n]*[:\-–—]?\s*/gi, " ");
+  text = text.replace(
+    /(?:Tiêu đề|Phụ đề|Thời lượng|Thời gian|durationMs|animationType|floatingTags|bulletPoints|type|Gợi ý hình ảnh|Prompt hình ảnh|Hình ảnh|Visual|Audio|Voiceover)[:\-–—]\s*/gi,
+    " ",
+  );
+  text = text.replace(/\b\d+(?:\.\d+)?(?:ms|s|giây)\b/gi, " ");
+  text = text.replace(/^[ \t]*[-*•]\s+/gm, " ");
+  text = text.replace(/[{}[\]]/g, " ");
+  text = text.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+
+  if (text.length < 10 && scenes && scenes.length > 0) {
+    const sceneTexts = scenes
+      .map((s) => s.subtitle || s.title)
+      .filter((t): t is string => Boolean(t && t.trim()));
+    if (sceneTexts.length > 0) {
+      text = sceneTexts.join(". ");
+    }
+  }
+
+  return text;
+}
+
+export function enrichScriptForDuration(
+  script: string,
+  scenes: MarketingSceneSpec[],
+  targetDurationSeconds = 0,
+): string {
+  const base = script.trim();
+  const minTargetSec = Math.max(
+    targetDurationSeconds,
+    scenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0) / 1000,
+  );
+  if (minTargetSec < 45) return base;
+
+  const targetWordCount = Math.floor(minTargetSec * 2.3);
+  const currentWords = base.split(/\s+/).filter(Boolean).length;
+  if (currentWords >= targetWordCount) return base;
+
+  const extraSegments: string[] = [];
+  const lowerBase = base.toLowerCase();
+
+  for (const scene of scenes) {
+    const parts: string[] = [];
+    if (scene.title && !lowerBase.includes(scene.title.toLowerCase())) {
+      parts.push(scene.title.trim());
+    }
+    if (scene.subtitle && !lowerBase.includes(scene.subtitle.toLowerCase())) {
+      parts.push(scene.subtitle.trim());
+    }
+    if (Array.isArray(scene.bulletPoints)) {
+      for (const bp of scene.bulletPoints) {
+        if (bp && !lowerBase.includes(bp.toLowerCase())) {
+          parts.push(bp.trim());
+        }
+      }
+    }
+    if (parts.length > 0) {
+      extraSegments.push(`${parts.join(". ")}.`);
+    }
+  }
+
+  if (extraSegments.length === 0) return base;
+  return `${base} ${extraSegments.join(" ")}`.replace(/\s+/g, " ").trim();
+}
+
+export function distributeScriptToScenes(script: string, sceneCount: number): string[] {
+  const count = Math.max(1, sceneCount);
+  const words = script.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return Array.from({ length: count }, () => "");
+  const chunkSize = Math.max(1, Math.ceil(words.length / count));
+  const result: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const slice = words.slice(i * chunkSize, (i + 1) * chunkSize).join(" ");
+    result.push(slice);
+  }
+  return result;
 }
 
 export async function generateMarketingVideoWorkflow(
   assetsRoot: string,
   input: GenerateMarketingVideoInput,
 ): Promise<GenerateMarketingVideoOutput> {
-  const campaignSlug = normalizeCampaignSlug(input.campaignSlug);
+  const campaignSlug = normalizeCampaignSlug(input.campaignSlug || "marketing-campaign");
   const campaignDir = join(assetsRoot, campaignSlug);
   mkdirSync(campaignDir, { recursive: true });
 
@@ -698,8 +862,28 @@ export async function generateMarketingVideoWorkflow(
   const bgmTheme = input.bgmTheme || "tech";
   const brandName = input.brandName || "RoMes AI";
 
+  const rawScenes = Array.isArray(input.scenes) && input.scenes.length > 0 ? input.scenes : [
+    { type: "hook" as const, title: campaignSlug.replace(/-/g, " ").toUpperCase(), durationMs: 4000 },
+    { type: "features" as const, title: "Tính năng nổi bật", bulletPoints: ["Tối ưu hiệu suất vượt trội", "Tự động hóa thông minh"], durationMs: 5000 },
+    { type: "product" as const, title: "Giải pháp toàn diện", subtitle: "Hiện đại hóa quy trình làm việc", durationMs: 5000 },
+    { type: "cta" as const, title: "Bắt đầu ngay hôm nay", subtitle: "Khám phá ngay", durationMs: 4000 },
+  ];
+
+  const requestedDurationMs = input.targetDurationSeconds && input.targetDurationSeconds > 0
+    ? Math.round(input.targetDurationSeconds * 1000)
+    : 0;
+  const rawSceneDuration = rawScenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0);
+  const desiredDurationMs = Math.max(requestedDurationMs, rawSceneDuration);
+
+  const sanitizedScript = sanitizeVoiceoverScript(input.script || "", rawScenes);
+  const cleanedScript = enrichScriptForDuration(
+    sanitizedScript,
+    rawScenes,
+    desiredDurationMs / 1000,
+  );
+
   const speechOutput = await generateMarketingSpeech({
-    script: input.script,
+    script: cleanedScript || input.script || "Trải nghiệm sức mạnh công nghệ AI đột phá ngay hôm nay.",
     campaignSlug,
     outputDir: campaignDir,
     voice: input.voice,
@@ -710,13 +894,16 @@ export async function generateMarketingVideoWorkflow(
     voicePath: speechOutput.audioPath,
     bgmTheme,
     outputPath: mixedAudioPath,
+    targetDurationMs: desiredDurationMs > speechOutput.durationMs ? desiredDurationMs : undefined,
   });
 
-  const totalAudioMs = Math.max(mixedAudio.durationMs, speechOutput.durationMs, 1000);
-  const rawSceneDuration = input.scenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0);
+  const totalAudioMs = Math.max(mixedAudio.durationMs, speechOutput.durationMs, desiredDurationMs, 1000);
   const scaleFactor = rawSceneDuration > 0 ? totalAudioMs / rawSceneDuration : 1;
 
-  const adjustedScenes = input.scenes.map((s, idx) => {
+  const discoveredImages = findDiscoveredCampaignImages(assetsRoot, campaignSlug);
+  const distributedSubtitles = distributeScriptToScenes(cleanedScript, rawScenes.length);
+
+  const adjustedScenes = rawScenes.map((s, idx) => {
     let imgPath = s.imagePath;
     if (!imgPath || !existsSync(imgPath)) {
       const candidates = [
@@ -732,9 +919,35 @@ export async function generateMarketingVideoWorkflow(
         }
       }
     }
+
+    if (!imgPath || !existsSync(imgPath)) {
+      if (discoveredImages.length > 0) {
+        const discovered = discoveredImages[idx % discoveredImages.length];
+        if (discovered && existsSync(discovered)) {
+          imgPath = discovered;
+          const ext = discovered.split(".").pop() || "jpg";
+          const localTarget = join(campaignDir, `image-${idx + 1}.${ext}`);
+          try {
+            if (!existsSync(localTarget)) {
+              copyFileSync(discovered, localTarget);
+              imgPath = localTarget;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    const spokenSegment = distributedSubtitles[idx];
+    const subtitles = Array.isArray(s.subtitles) && s.subtitles.length > 0
+      ? s.subtitles
+      : spokenSegment
+      ? [spokenSegment]
+      : undefined;
+
     return {
       ...s,
       imagePath: imgPath,
+      subtitles,
       durationMs: Math.max(500, Math.round((s.durationMs || 3000) * scaleFactor)),
     };
   });
@@ -749,6 +962,23 @@ export async function generateMarketingVideoWorkflow(
     brandName,
   });
 
+  const narrationSeconds = Math.round(speechOutput.durationMs / 100) / 10;
+  const narrationGap = requestedDurationMs > 0 && speechOutput.durationMs < requestedDurationMs * 0.9
+    ? ` Narration lasts only ${narrationSeconds}s of the requested ${Math.round(requestedDurationMs / 1000)}s; the rest has music only. Tell the user, and offer a longer script if they want narration throughout.`
+    : "";
+
+  const defaultVideoPath = join(campaignDir, "video.mp4");
+  try {
+    if (existsSync(defaultVideoPath)) rmSync(defaultVideoPath, { force: true });
+    copyFileSync(renderOutput.videoPath, defaultVideoPath);
+  } catch {}
+
+  const defaultAudioPath = join(campaignDir, "audio.mp3");
+  try {
+    if (existsSync(defaultAudioPath)) rmSync(defaultAudioPath, { force: true });
+    copyFileSync(mixedAudio.mixedAudioPath, defaultAudioPath);
+  } catch {}
+
   return {
     campaignSlug,
     videoPath: renderOutput.videoPath,
@@ -757,10 +987,11 @@ export async function generateMarketingVideoWorkflow(
     width: renderOutput.width,
     height: renderOutput.height,
     durationSeconds: renderOutput.durationSeconds,
+    narrationSeconds,
     bytes: renderOutput.bytes,
     ratio,
     nextStepHint:
-      'Video rendering complete! Call agents_attach_file with {"path": videoPath} to preview the video in chat, then present the copy and draft for user review before publishing.',
+      `Video rendering complete! Call agents_attach_file with path: "${renderOutput.videoPath}". Do NOT invent paths like /home/cua/workspace. To publish or re-share this video later, reuse this same file; do not render it again.${narrationGap}`,
   };
 }
 

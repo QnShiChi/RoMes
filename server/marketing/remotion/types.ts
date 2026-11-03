@@ -9,11 +9,12 @@ export type ContextualAnimationType =
   | "default";
 
 export interface MarketingSceneSpec {
-  type: "hook" | "product" | "problem" | "solution" | "features" | "stats" | "cta";
+  type: "hook" | "problem" | "split" | "stats" | "features" | "product" | "quote" | "solution" | "cta";
   title: string;
   subtitle?: string;
   features?: string[];
   bulletPoints?: string[];
+  subtitles?: string[];
   imageUrl?: string;
   imagePath?: string;
   durationMs?: number;

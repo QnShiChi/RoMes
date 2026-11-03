@@ -94,7 +94,8 @@ export async function renderWithRemotion(
 
   const resolvedScenes = spec.scenes.map((s) => {
     const raw = s.imagePath || (s as { imageUrl?: string }).imageUrl;
-    const resolvedUrl = raw ? resolveImageSource(raw) : undefined;
+    const resolved = raw ? resolveImageSource(raw) : "";
+    const resolvedUrl = resolved || undefined;
     return {
       ...s,
       imageUrl: resolvedUrl,
@@ -312,7 +313,8 @@ export async function renderMarketingVideo(
 
   try {
     return await renderWithRemotion(spec, options);
-  } catch {
+  } catch (error) {
+    console.error("[video-compiler] Remotion render failed, falling back to html-ffmpeg:", error);
     return await renderWithHtmlFfmpeg(spec, options);
   }
 }

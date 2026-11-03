@@ -10,11 +10,14 @@ import {
 import { DeviceMockup } from "./DeviceMockup.tsx";
 import { FloatingBadges } from "./FloatingBadges.tsx";
 import { KineticCaptions } from "./KineticCaptions.tsx";
+import type { SceneLayout } from "./layout.ts";
+import { ProblemLayout, QuoteLayout, SplitLayout, StatsLayout } from "./Layouts.tsx";
 import { MicroAnimation } from "./MicroAnimations.tsx";
 import type { MarketingSceneSpec, VideoRatio } from "./types.ts";
 
 interface SceneProps {
   scene: MarketingSceneSpec;
+  layout: SceneLayout;
   brandName: string;
   durationInFrames: number;
   ratio: VideoRatio;
@@ -22,6 +25,7 @@ interface SceneProps {
 
 export const Scene: React.FC<SceneProps> = ({
   scene,
+  layout,
   brandName,
   durationInFrames,
   ratio,
@@ -53,8 +57,17 @@ export const Scene: React.FC<SceneProps> = ({
   const kenBurnsScale = interpolate(frame, [0, durationInFrames], [1, 1.14], { extrapolateRight: "clamp" });
 
   const imageSource = scene.imageUrl || scene.imagePath;
-  const featuresList = scene.bulletPoints || scene.features;
-  const sceneType = scene.type || "product";
+  const featuresList = (scene.bulletPoints && scene.bulletPoints.length > 0)
+    ? scene.bulletPoints
+    : (scene.features && scene.features.length > 0)
+    ? scene.features
+    : scene.subtitle
+    ? [scene.subtitle]
+    : scene.floatingTags && scene.floatingTags.length > 0
+    ? scene.floatingTags
+    : ["Tối ưu hiệu suất vượt trội", "Công nghệ AI tiên phong"];
+  const captionText = scene.subtitles?.length ? scene.subtitles.join(" ") : layout === "cta" ? "" : scene.subtitle;
+  const layoutProps = { scene, brandName, isVertical, imageSource: imageSource || undefined, durationInFrames };
 
   return (
     <AbsoluteFill
@@ -66,16 +79,48 @@ export const Scene: React.FC<SceneProps> = ({
         opacity: sceneOpacity,
       }}
     >
+      {imageSource && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            overflow: "hidden",
+            pointerEvents: "none",
+          }}
+        >
+          <Img
+            src={imageSource}
+            alt="Ambient background"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              filter: "blur(42px) brightness(0.26) saturate(1.3)",
+              transform: `scale(${kenBurnsScale * 1.15})`,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(180deg, rgba(7, 10, 18, 0.4) 0%, rgba(7, 10, 18, 0.72) 60%, rgba(7, 10, 18, 0.96) 100%)",
+            }}
+          />
+        </div>
+      )}
+
       {/* Dynamic Background Orbs */}
       <div
         style={{
           position: "absolute",
           top: "-15%",
-          left: "20%",
-          width: width * 0.7,
-          height: width * 0.7,
+          left: "15%",
+          width: width * 0.75,
+          height: width * 0.75,
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(99, 102, 241, 0.28) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(99, 102, 241, 0.35) 0%, transparent 70%)",
           transform: `translate(${orb1X}px, ${orb1Y}px)`,
           filter: "blur(60px)",
           pointerEvents: "none",
@@ -86,12 +131,26 @@ export const Scene: React.FC<SceneProps> = ({
           position: "absolute",
           bottom: "10%",
           right: "-10%",
-          width: width * 0.8,
-          height: width * 0.8,
+          width: width * 0.85,
+          height: width * 0.85,
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(168, 85, 247, 0.22) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(168, 85, 247, 0.28) 0%, transparent 70%)",
           transform: `translate(${orb2X}px, ${orb2Y}px)`,
           filter: "blur(70px)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: "40%",
+          left: "20%",
+          width: width * 0.6,
+          height: width * 0.6,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(56, 189, 248, 0.22) 0%, transparent 70%)",
+          transform: `translate(${Math.cos(frame / 20) * 35}px, ${Math.sin(frame / 22) * 25}px)`,
+          filter: "blur(65px)",
           pointerEvents: "none",
         }}
       />
@@ -111,7 +170,7 @@ export const Scene: React.FC<SceneProps> = ({
       {/* =========================================================================
           LAYOUT 1: HOOK SCENE (Cinematic Full-Bleed Hero Image + Punchy Typography)
           ========================================================================= */}
-      {sceneType === "hook" && (
+      {layout === "hero" && (
         <>
           {imageSource && (
             <div
@@ -228,7 +287,7 @@ export const Scene: React.FC<SceneProps> = ({
       {/* =========================================================================
           LAYOUT 2: FEATURES SCENE (Asymmetrical Split: Photo Top + Staggered Cards Bottom)
           ========================================================================= */}
-      {sceneType === "features" && (
+      {layout === "cards" && (
         <div
           style={{
             position: "relative",
@@ -236,8 +295,9 @@ export const Scene: React.FC<SceneProps> = ({
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
+            justifyContent: imageSource ? "flex-start" : "center",
             height: "100%",
-            padding: isVertical ? "65px 44px 220px 44px" : "40px 70px",
+            padding: isVertical ? (imageSource ? "65px 44px 220px 44px" : "60px 44px 220px 44px") : "40px 70px",
             boxSizing: "border-box",
           }}
         >
@@ -293,7 +353,7 @@ export const Scene: React.FC<SceneProps> = ({
           </h2>
 
           {/* Featured Visual Window */}
-          {imageSource && (
+          {imageSource ? (
             <div
               style={{
                 width: isVertical ? "94%" : "68%",
@@ -323,6 +383,33 @@ export const Scene: React.FC<SceneProps> = ({
                   background: "linear-gradient(180deg, transparent 60%, rgba(7, 10, 18, 0.8) 100%)",
                 }}
               />
+            </div>
+          ) : (
+            <div
+              style={{
+                width: isVertical ? "94%" : "72%",
+                margin: "10px 0 24px 0",
+                padding: isVertical ? "26px 22px" : "18px",
+                borderRadius: "24px",
+                background: "linear-gradient(135deg, rgba(99, 102, 241, 0.18) 0%, rgba(56, 189, 248, 0.12) 100%)",
+                border: "1px solid rgba(165, 180, 252, 0.35)",
+                backdropFilter: "blur(20px)",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 30px rgba(99, 102, 241, 0.15)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "24px" }}>⚡</span>
+                <span style={{ fontSize: isVertical ? "21px" : "17px", fontWeight: 700, color: "#38bdf8", letterSpacing: "0.06em" }}>
+                  AGENTIC AI ARCHITECTURE
+                </span>
+              </div>
+              <div style={{ fontSize: isVertical ? "16px" : "13px", color: "#94a3b8", textAlign: "center" }}>
+                {scene.subtitle || "Tối ưu hóa quy trình làm việc và tự động hoá phát triển"}
+              </div>
             </div>
           )}
 
@@ -382,7 +469,7 @@ export const Scene: React.FC<SceneProps> = ({
       {/* =========================================================================
           LAYOUT 3: CTA SCENE (Pulsing High-Conversion Action Button + Authority Badge)
           ========================================================================= */}
-      {sceneType === "cta" && (
+      {layout === "cta" && (
         <>
           {imageSource && (
             <div
@@ -515,7 +602,12 @@ export const Scene: React.FC<SceneProps> = ({
       {/* =========================================================================
           LAYOUT 4: PRODUCT / SHOWCASE (3D Floating Glass Frame with Badges)
           ========================================================================= */}
-      {sceneType !== "hook" && sceneType !== "features" && sceneType !== "cta" && (
+      {layout === "problem" && <ProblemLayout {...layoutProps} />}
+      {layout === "split" && <SplitLayout {...layoutProps} />}
+      {layout === "stats" && <StatsLayout {...layoutProps} />}
+      {layout === "quote" && <QuoteLayout {...layoutProps} />}
+
+      {layout === "showcase" && (
         <div
           style={{
             position: "relative",
@@ -589,8 +681,34 @@ export const Scene: React.FC<SceneProps> = ({
             </h1>
           </div>
 
-          {imageSource && (
-            <DeviceMockup imageSource={imageSource} isVertical={isVertical} />
+          <DeviceMockup imageSource={imageSource || undefined} isVertical={isVertical} />
+
+          {scene.subtitle && (
+            <div
+              style={{
+                marginTop: isVertical ? "18px" : "12px",
+                marginBottom: isVertical ? "16px" : "10px",
+                padding: isVertical ? "12px 28px" : "10px 22px",
+                borderRadius: "18px",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "1px solid rgba(255, 255, 255, 0.16)",
+                backdropFilter: "blur(16px)",
+                maxWidth: isVertical ? "92%" : "72%",
+                textAlign: "center",
+                boxShadow: "0 10px 30px rgba(0, 0, 0, 0.4)",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: isVertical ? "22px" : "18px",
+                  fontWeight: 600,
+                  color: "#f1f5f9",
+                  lineHeight: 1.35,
+                }}
+              >
+                {scene.subtitle}
+              </span>
+            </div>
           )}
 
           <FloatingBadges tags={scene.floatingTags} isVertical={isVertical} />
@@ -598,8 +716,8 @@ export const Scene: React.FC<SceneProps> = ({
       )}
 
       {/* Synchronized Kinetic Captions for voiceover / narration */}
-      {scene.subtitle && sceneType !== "cta" && (
-        <KineticCaptions text={scene.subtitle} isVertical={isVertical} />
+      {captionText && layout !== "quote" && (
+        <KineticCaptions text={captionText} isVertical={isVertical} />
       )}
     </AbsoluteFill>
   );

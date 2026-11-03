@@ -1,17 +1,21 @@
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { publishPostHeadless, type PublishPlatform } from "./publisher.ts";
+import { assessMarketingBrief, type MarketingBriefInput } from "./brief.ts";
+import { createCampaignStore } from "./campaign-store.ts";
+import { renderApprovedCampaign } from "./campaign-workflow.ts";
+import { routeMarketingIntent } from "./intent.ts";
+import { createPublisherGateway, type PublishPlatform } from "./publisher-gateway.ts";
 import {
   generateMarketingImages,
   generateMarketingVideoWorkflow,
   getMarketingDraft,
-  markMarketingPublished,
   saveMarketingDraft,
   type GenerateMarketingVideoInput,
   type ImagePromptSpec,
   type MarketingPostDraft,
-  type PublishedPlatformResult,
 } from "./studio.ts";
 
 const ASSETS_ROOT =
@@ -24,7 +28,55 @@ const BASE_URL =
   process.env.OMB_POLLINATIONS_BASE_URL?.trim() ||
   undefined;
 
+const CAMPAIGNS = createCampaignStore(ASSETS_ROOT);
+const PUBLISHER = createPublisherGateway(CAMPAIGNS, []);
+
 const TOOLS = [
+  {
+    name: "route_marketing_request",
+    description: "Classify a marketing request before choosing any production or publishing action.",
+    inputSchema: {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"],
+    },
+  },
+  {
+    name: "prepare_marketing_campaign",
+    description: "Validate the marketing brief. Missing decisions return consultation questions and create no campaign.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignSlug: { type: "string" },
+        topic: { type: "string" },
+        goal: { type: "string" },
+        audience: { type: "string" },
+        platform: { type: "string" },
+        style: { type: "string" },
+        targetDurationSeconds: { type: "number" },
+        callToAction: { type: "string" },
+      },
+      required: ["campaignSlug"],
+    },
+  },
+  {
+    name: "approve_marketing_campaign",
+    description: "Approve exactly the reviewed campaign revision before production starts.",
+    inputSchema: {
+      type: "object",
+      properties: { campaignId: { type: "string" }, revision: { type: "number" } },
+      required: ["campaignId", "revision"],
+    },
+  },
+  {
+    name: "get_marketing_campaign",
+    description: "Read the exact campaign lifecycle and artifact manifest by ID.",
+    inputSchema: {
+      type: "object",
+      properties: { campaignId: { type: "string" } },
+      required: ["campaignId"],
+    },
+  },
   {
     name: "generate_marketing_images",
     description:
@@ -32,9 +84,9 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        campaignSlug: {
+        campaignId: {
           type: "string",
-          description: "Short slug for the campaign (e.g. 'iphone-duo-launch').",
+          description: "Approved campaign ID.",
         },
         prompts: {
           type: "array",
@@ -57,7 +109,7 @@ const TOOLS = [
           },
         },
       },
-      required: ["campaignSlug", "prompts"],
+      required: ["campaignId", "prompts"],
     },
   },
   {
@@ -67,6 +119,10 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
+        campaignId: {
+          type: "string",
+          description: "Approved campaign ID whose assets are ready.",
+        },
         campaignSlug: {
           type: "string",
           description: "Short slug for the campaign (e.g. 'keychron-q1-launch').",
@@ -77,14 +133,16 @@ const TOOLS = [
         },
         scenes: {
           type: "array",
-          description: "List of animated scenes (hook, product, features, cta).",
+          description:
+            "Animated scenes. Each scene type has its own layout; vary them so consecutive scenes look different.",
           items: {
             type: "object",
             properties: {
               type: {
                 type: "string",
-                enum: ["hook", "product", "features", "cta"],
-                description: "Scene type.",
+                enum: ["hook", "problem", "split", "stats", "features", "product", "quote", "cta"],
+                description:
+                  "hook: full-bleed hero. problem: dark warning card. split: before/after comparison (first 2 bulletPoints are the two sides). stats: big animated numbers (bulletPoints like '10x | Năng suất'). features: staggered cards. product: device mockup. quote: key insight quote. cta: action button.",
               },
               title: { type: "string", description: "Main headline for this scene." },
               subtitle: { type: "string", description: "Supporting subtitle." },
@@ -111,8 +169,45 @@ const TOOLS = [
           description: "Google AI Studio voice name (e.g. 'Puck', 'Charon', 'Aoede').",
         },
         brandName: { type: "string", description: "Brand name watermark/badge." },
+        targetDurationSeconds: {
+          type: "number",
+          description:
+            "Video length the user asked for, in seconds. The video is never shorter than this; write about 2.3 Vietnamese words per second of script to fill it with narration.",
+        },
       },
-      required: ["campaignSlug", "script", "scenes"],
+      required: ["campaignId", "campaignSlug", "script", "scenes", "targetDurationSeconds"],
+    },
+  },
+  {
+    name: "resolve_marketing_artifact",
+    description: "Resolve an existing campaign artifact for preview, download, or publishing without regenerating it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        type: { type: "string", enum: ["script", "image", "speech", "mixed_audio", "video", "publish_evidence"] },
+      },
+      required: ["campaignId", "type"],
+    },
+  },
+  {
+    name: "get_marketing_publish_capabilities",
+    description: "List real configured social publishing accounts. An empty list means automatic publishing is unavailable.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "publish_marketing_artifact",
+    description: "Publish one ready video through a configured provider. Success requires provider evidence.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        artifactId: { type: "string" },
+        platform: { type: "string", enum: ["tiktok", "facebook"] },
+        caption: { type: "string" },
+        idempotencyKey: { type: "string" },
+      },
+      required: ["campaignId", "artifactId", "platform", "caption", "idempotencyKey"],
     },
   },
   {
@@ -155,64 +250,6 @@ const TOOLS = [
       required: ["campaignSlug"],
     },
   },
-  {
-    name: "mark_marketing_published",
-    description: "Record the final publishing status and post URLs for a marketing campaign.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        campaignSlug: { type: "string" },
-        results: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              platform: { type: "string" },
-              status: { type: "string", enum: ["published", "failed"] },
-              url: { type: "string" },
-              note: { type: "string" },
-            },
-            required: ["platform", "status"],
-          },
-        },
-      },
-      required: ["campaignSlug", "results"],
-    },
-  },
-  {
-    name: "publish_post",
-    description:
-      "Publish marketing content (video, image gallery, or text copy) headlessly to TikTok or Facebook without interactive browser steps.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        platform: {
-          type: "string",
-          enum: ["tiktok", "facebook"],
-          description: "Target social media platform.",
-        },
-        videoPath: {
-          type: "string",
-          description: "Optional absolute local path to the rendered .mp4 video.",
-        },
-        imagePaths: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional list of local image paths for photo posts.",
-        },
-        caption: {
-          type: "string",
-          description: "Post caption text.",
-        },
-        hashtags: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional list of hashtags.",
-        },
-      },
-      required: ["platform", "caption"],
-    },
-  },
 ];
 
 function send(message: Record<string, unknown>): void {
@@ -220,13 +257,96 @@ function send(message: Record<string, unknown>): void {
 }
 
 async function handleCall(name: string, args: Record<string, unknown>) {
+  if (name === "route_marketing_request") {
+    return {
+      content: [{ type: "text", text: JSON.stringify(routeMarketingIntent(String(args.message ?? "")), null, 2) }],
+    };
+  }
+
+  if (name === "prepare_marketing_campaign") {
+    const assessment = assessMarketingBrief(args as MarketingBriefInput);
+    if (!assessment.complete) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ needsConsultation: true, ...assessment }, null, 2),
+        }],
+      };
+    }
+    const campaign = CAMPAIGNS.prepare(String(args.campaignSlug ?? ""), assessment.brief);
+    return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
+  }
+
+  if (name === "approve_marketing_campaign") {
+    const campaign = CAMPAIGNS.approve(String(args.campaignId ?? ""), Number(args.revision));
+    return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
+  }
+
+  if (name === "get_marketing_campaign") {
+    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    return { content: [{ type: "text", text: JSON.stringify(campaign, null, 2) }] };
+  }
+
   if (name === "generate_marketing_images") {
-    const campaignSlug = String(args.campaignSlug ?? "campaign");
+    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    if (campaign.status !== "approved" && campaign.status !== "scripting" && campaign.status !== "assets_ready") {
+      throw new Error(`Campaign must be approved before image generation; current status is ${campaign.status}`);
+    }
     const prompts = (Array.isArray(args.prompts) ? args.prompts : []) as ImagePromptSpec[];
+    if (prompts.length === 0) throw new Error("At least one image prompt is required");
+    const batchKey = `images:${createHash("sha256").update(JSON.stringify(prompts)).digest("hex")}`;
+    const current = CAMPAIGNS.get(campaign.id);
+    const reusable = current.artifacts.filter((artifact) => artifact.type === "image" && artifact.operationKey.startsWith(`${batchKey}:`) && existsSync(artifact.path));
+    if (reusable.length === prompts.length) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            campaignSlug: campaign.slug,
+            campaignDir: join(ASSETS_ROOT, campaign.slug),
+            images: reusable.map((artifact, index) => ({
+              index,
+              label: String(artifact.metadata.label ?? `Image ${index + 1}`),
+              prompt: String(artifact.metadata.prompt ?? prompts[index]?.prompt ?? ""),
+              filePath: artifact.path,
+              url: String(artifact.metadata.url ?? ""),
+              mimeType: String(artifact.metadata.mimeType ?? "image/jpeg"),
+              width: Number(artifact.metadata.width ?? 0),
+              height: Number(artifact.metadata.height ?? 0),
+              bytes: artifact.bytes,
+            })),
+            failed: [],
+            reused: true,
+          }, null, 2),
+        }],
+      };
+    }
+    CAMPAIGNS.beginOperation(campaign.id, batchKey, "images");
+    if (campaign.status === "approved") CAMPAIGNS.transition(campaign.id, "scripting");
     const output = await generateMarketingImages(
-      { campaignSlug, prompts },
+      { campaignSlug: campaign.slug, prompts },
       { assetsRoot: ASSETS_ROOT, ...(BASE_URL ? { baseUrl: BASE_URL } : {}) },
     );
+    if (output.images.length === 0) {
+      CAMPAIGNS.failOperation(campaign.id, batchKey);
+      CAMPAIGNS.fail(campaign.id, "scripting");
+      throw new Error("Image generation produced no usable campaign assets");
+    }
+    const artifacts = output.images.map((image, index) => CAMPAIGNS.registerArtifact(campaign.id, {
+      type: "image",
+      path: image.filePath,
+      operationKey: `${batchKey}:${index}`,
+      metadata: {
+        label: image.label,
+        prompt: image.prompt,
+        url: image.url,
+        mimeType: image.mimeType,
+        width: image.width,
+        height: image.height,
+      },
+    }));
+    CAMPAIGNS.finishOperation(campaign.id, batchKey, artifacts[0]!.id);
+    if (CAMPAIGNS.get(campaign.id).status === "scripting") CAMPAIGNS.transition(campaign.id, "assets_ready");
     return {
       content: [
         {
@@ -234,8 +354,11 @@ async function handleCall(name: string, args: Record<string, unknown>) {
           text: JSON.stringify(
             {
               ...output,
+              campaignId: campaign.id,
+              artifactIds: artifacts.map((artifact) => artifact.id),
+              reused: false,
               nextStepHint:
-                'Call agents_attach_file with {"path": filePath} (pass ONLY "path", do NOT pass "caption") for each image so the user sees the image gallery directly in chat, then present the copy and wait for confirmation before publishing.',
+                "Images generated successfully. Return the list of file paths to RoMes and Momo.",
             },
             null,
             2,
@@ -246,9 +369,20 @@ async function handleCall(name: string, args: Record<string, unknown>) {
   }
 
   if (name === "generate_marketing_video") {
-    const output = await generateMarketingVideoWorkflow(
-      ASSETS_ROOT,
-      args as unknown as GenerateMarketingVideoInput,
+    const campaignId = String(args.campaignId ?? "");
+    const targetDurationSeconds = Number(args.targetDurationSeconds);
+    if (!Number.isFinite(targetDurationSeconds) || targetDurationSeconds <= 0) {
+      throw new Error("targetDurationSeconds must be a positive number");
+    }
+    const input = {
+      ...(args as unknown as GenerateMarketingVideoInput),
+      targetDurationSeconds,
+    };
+    const output = await renderApprovedCampaign(
+      CAMPAIGNS,
+      campaignId,
+      input,
+      (renderInput) => generateMarketingVideoWorkflow(ASSETS_ROOT, renderInput),
     );
     return {
       content: [
@@ -258,6 +392,51 @@ async function handleCall(name: string, args: Record<string, unknown>) {
         },
       ],
     };
+  }
+
+  if (name === "resolve_marketing_artifact") {
+    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    const type = String(args.type ?? "");
+    const artifact = type === "video"
+      ? CAMPAIGNS.resolveLatestReadyVideo(campaign.id)
+      : campaign.artifacts.findLast((candidate) => candidate.type === type && existsSync(candidate.path)) ?? null;
+    if (!artifact) throw new Error(`No ready ${type} artifact exists for campaign ${campaign.id}`);
+    return { content: [{ type: "text", text: JSON.stringify(artifact, null, 2) }] };
+  }
+
+  if (name === "get_marketing_publish_capabilities") {
+    const capabilities = await PUBLISHER.capabilities();
+    return { content: [{ type: "text", text: JSON.stringify({ capabilities }, null, 2) }] };
+  }
+
+  if (name === "publish_marketing_artifact") {
+    const campaign = CAMPAIGNS.get(String(args.campaignId ?? ""));
+    const artifactId = String(args.artifactId ?? "");
+    const artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId && candidate.type === "video");
+    if (!artifact || !existsSync(artifact.path)) throw new Error(`Ready video artifact not found: ${artifactId}`);
+    const platform = String(args.platform ?? "") as PublishPlatform;
+    const capabilities = await PUBLISHER.capabilities();
+    if (!capabilities.some((capability) => capability.platform === platform)) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            published: false,
+            reason: "no_configured_publisher",
+            message: `No real ${platform} publisher is configured. Reuse the ready video artifact for manual upload.`,
+            artifact: { id: artifact.id, path: artifact.path },
+          }, null, 2),
+        }],
+      };
+    }
+    const evidence = await PUBLISHER.publish({
+      campaignId: campaign.id,
+      artifactId,
+      platform,
+      caption: String(args.caption ?? ""),
+      idempotencyKey: String(args.idempotencyKey ?? ""),
+    });
+    return { content: [{ type: "text", text: JSON.stringify({ published: true, evidence }, null, 2) }] };
   }
 
   if (name === "save_marketing_draft") {
@@ -276,28 +455,6 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const draft = await getMarketingDraft(ASSETS_ROOT, String(args.campaignSlug ?? ""));
     return {
       content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
-    };
-  }
-
-  if (name === "mark_marketing_published") {
-    const draft = await markMarketingPublished(ASSETS_ROOT, {
-      campaignSlug: String(args.campaignSlug ?? ""),
-      results: (Array.isArray(args.results) ? args.results : []) as PublishedPlatformResult[],
-    });
-    return {
-      content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
-    };
-  }
-
-  if (name === "publish_post" || name === "marketing_studio_publish_post") {
-    const platform = (args.platform === "facebook" ? "facebook" : "tiktok") as PublishPlatform;
-    const videoPath = args.videoPath ? String(args.videoPath) : undefined;
-    const imagePaths = Array.isArray(args.imagePaths) ? args.imagePaths.map(String) : undefined;
-    const caption = String(args.caption ?? "");
-    const hashtags = Array.isArray(args.hashtags) ? args.hashtags.map(String) : undefined;
-    const output = await publishPostHeadless({ platform, videoPath, imagePaths, caption, hashtags });
-    return {
-      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
     };
   }
 

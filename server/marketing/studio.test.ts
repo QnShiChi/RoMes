@@ -1,18 +1,21 @@
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   detectImageFormat,
+  distributeScriptToScenes,
+  enrichScriptForDuration,
   extractKeywordsForSearch,
+  findDiscoveredCampaignImages,
   generateMarketingImages,
   generateMarketingVideoWorkflow,
   getMarketingDraft,
-  markMarketingPublished,
   resolveUnsplashKey,
   saveMarketingDraft,
+  sanitizeVoiceoverScript,
 } from "./studio.ts";
 
 const VALID_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
@@ -56,6 +59,32 @@ describe("marketing studio core", () => {
       ),
     ).toBe("business strategy technology futuristic");
     expect(extractKeywordsForSearch("")).toBe("technology artificial intelligence business");
+  });
+
+  it("keeps the AI subject and drops narrative filler when searching stock photos", () => {
+    const query = extractKeywordsForSearch(
+      "Dynamic split-screen scene showing opportunities and risks of AI in business, dramatic lighting",
+    );
+    expect(query).not.toMatch(/\b(scene|showing|opportunities|risks|dramatic)\b/);
+    expect(query).toMatch(/artificial intelligence|business|technology/);
+    expect(extractKeywordsForSearch("ai chip glowing")).toContain("artificial intelligence");
+  });
+
+  it("extends a short script toward the requested duration with scene copy", () => {
+    const scenes = [
+      { type: "hook" as const, title: "Tương lai AI", durationMs: 4000 },
+      { type: "features" as const, title: "Lợi ích", bulletPoints: ["Tăng năng suất gấp đôi", "Giảm chi phí vận hành"], durationMs: 4000 },
+    ];
+    const short = "AI đang thay đổi doanh nghiệp.";
+    const enriched = enrichScriptForDuration(short, scenes, 60);
+    expect(enriched.startsWith(short)).toBe(true);
+    expect(enriched).toContain("Tăng năng suất gấp đôi");
+    expect(enrichScriptForDuration(short, scenes, 20)).toBe(short);
+  });
+
+  it("splits narration across scenes in spoken order", () => {
+    const parts = distributeScriptToScenes("một hai ba bốn năm sáu bảy", 3);
+    expect(parts).toEqual(["một hai ba", "bốn năm sáu", "bảy"]);
   });
 
   it("resolves Unsplash access key from argument, environment, or config", () => {
@@ -114,7 +143,7 @@ describe("marketing studio core", () => {
     expect(existsSync(result.images[0]!.filePath)).toBe(true);
   });
 
-  it("persists, retrieves, and updates campaign draft state", async () => {
+  it("persists and retrieves campaign draft state", async () => {
     const root = makeTempDir();
     const saved = await saveMarketingDraft(root, {
       campaignSlug: "iphone-duo",
@@ -136,12 +165,6 @@ describe("marketing studio core", () => {
     expect(loaded.productName).toBe("iPhone Duo");
     expect(loaded.posts[0]!.platform).toBe("facebook");
 
-    const published = await markMarketingPublished(root, {
-      campaignSlug: "iphone-duo",
-      results: [{ platform: "facebook", status: "published", url: "https://facebook.com/posts/123" }],
-    });
-    expect(published.status).toBe("published");
-    expect(published.publishedResults?.[0]?.url).toBe("https://facebook.com/posts/123");
   });
 
   it("orchestrates video generation workflow producing complete MP4 and audio", async () => {
@@ -170,6 +193,90 @@ describe("marketing studio core", () => {
     expect(result.width).toBe(1080);
     expect(result.height).toBe(1920);
     expect(result.bytes).toBeGreaterThan(1000);
-    expect(result.nextStepHint).toContain("agents_attach_file");
+    expect(result.nextStepHint).toContain(result.videoPath);
+    expect(existsSync(join(root, "test-video-flow", "video.mp4"))).toBe(true);
+    expect(existsSync(join(root, "test-video-flow", "audio.mp3"))).toBe(true);
+  });
+
+  it("sanitizes storyboard labels and extracts pure voiceover prose", () => {
+    const rawMarkdownWithLabels = `
+### Cảnh 1: Tiêu đề: AI trong đời sống
+- Thời gian: 3000ms
+- animationType: growth
+Trí tuệ nhân tạo đang thay đổi cuộc sống của bạn mỗi ngày.
+
+### Cảnh 2: Phụ đề: Tối ưu hiệu quả công việc
+- durationMs: 2500ms
+floatingTags: Tốc độ, Hiệu quả
+Giúp bạn hoàn thành mọi dự án nhanh hơn bao giờ hết.
+    `;
+
+    const cleaned = sanitizeVoiceoverScript(rawMarkdownWithLabels);
+    expect(cleaned).not.toContain("Cảnh 1");
+    expect(cleaned).not.toContain("Tiêu đề:");
+    expect(cleaned).not.toContain("Phụ đề:");
+    expect(cleaned).not.toContain("animationType");
+    expect(cleaned).not.toContain("durationMs");
+    expect(cleaned).not.toContain("floatingTags");
+    expect(cleaned).toContain("Trí tuệ nhân tạo đang thay đổi cuộc sống");
+    expect(cleaned).toContain("Giúp bạn hoàn thành mọi dự án");
+  });
+
+  it("extracts dedicated VOICEOVER section if present in Poppy's output", () => {
+    const structuredPoppyScript = `
+### LỜI BÌNH LỒNG TIẾNG (VOICEOVER SCRIPT)
+Đột phá công nghệ marketing cùng trợ lý ảo thông minh RoMes. Tự động hóa sáng tạo nội dung đa nền tảng chỉ trong vài phút.
+
+### PHÂN CẢNH HÌNH ẢNH (SCENES)
+Cảnh 1 (Hook): Chào đón tương lai
+Cảnh 2 (Features): Tính năng nổi bật
+    `;
+
+    const cleaned = sanitizeVoiceoverScript(structuredPoppyScript);
+    expect(cleaned).toBe("Đột phá công nghệ marketing cùng trợ lý ảo thông minh RoMes. Tự động hóa sáng tạo nội dung đa nền tảng chỉ trong vài phút.");
+    expect(cleaned).not.toContain("PHÂN CẢNH HÌNH ẢNH");
+  });
+
+  it("extracts voiceover when prefixed with PHẦN 1 and cuts off PHÂN CẢNH storyboard", () => {
+    const realScript = `
+### PHẦN 1: LỜI BÌNH LỒNG TIẾNG (VOICEOVER SCRIPT)
+Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang trải qua những biến đổi sâu sắc. Công nghệ không chỉ thay đổi cách chúng ta làm việc mà còn hình thành các phương thức giao tiếp mới.
+
+### PHÂN CẢNH HÌNH ẢNH (SCENES)
+- **Cảnh 1 (type: "hook")**:
+  * Title: "Biến Đổi Xã Hội Việt Nam"
+  * Subtitle: "Đằng Sau Sự Phát Triển Của AI"
+  * Prompt: "Vietnam's changing society due to AI development"
+    `;
+    const cleaned = sanitizeVoiceoverScript(realScript);
+    expect(cleaned).toBe("Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang trải qua những biến đổi sâu sắc. Công nghệ không chỉ thay đổi cách chúng ta làm việc mà còn hình thành các phương thức giao tiếp mới.");
+    expect(cleaned).not.toContain("PHÂN CẢNH");
+    expect(cleaned).not.toContain("Biến Đổi Xã Hội");
+  });
+
+  it("falls back to scene titles/subtitles if script is empty", () => {
+    const fallback = sanitizeVoiceoverScript("", [
+      { type: "hook", title: "Khám phá RoMes Marketing", subtitle: "Giải pháp video tự động", durationMs: 3000 },
+      { type: "cta", title: "Bắt đầu ngay hôm nay", durationMs: 3000 },
+    ]);
+    expect(fallback).toBe("Giải pháp video tự động. Bắt đầu ngay hôm nay");
+  });
+
+  it("findDiscoveredCampaignImages finds images in sibling folder matching slug tokens", () => {
+    const root = makeTempDir();
+    const siblingDir = join(root, "agentic-ai-impact-programming");
+    mkdirSync(siblingDir, { recursive: true });
+    writeFileSync(join(siblingDir, "image-1.jpg"), VALID_JPEG);
+    writeFileSync(join(siblingDir, "image-2.jpg"), VALID_JPEG);
+
+    const discovered = findDiscoveredCampaignImages(root, "agentic-ai-programming-impact");
+    expect(discovered).toHaveLength(2);
+    expect(discovered[0]).toContain("image-1.jpg");
+    expect(discovered[1]).toContain("image-2.jpg");
+  });
+
+  it("findDiscoveredCampaignImages returns empty array when directory does not exist", () => {
+    const empty = findDiscoveredCampaignImages("/non-existent-dir-12345", "test");
+    expect(empty).toEqual([]);
   });
 });
