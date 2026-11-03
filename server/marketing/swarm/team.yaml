@@ -1,0 +1,43 @@
+version: 1
+teams:
+  - name: Marketing
+    brief: RoMes coordinates approved marketing campaigns. External success requires tool evidence.
+bots:
+  - name: RoMes
+    team: Marketing
+    chief: true
+    manages: [Marketing]
+    computer: off
+    soul: { file: romes.md }
+    tools:
+      allow:
+        - mcp:agents:coordinate_bots
+        - mcp:agents:attach_file
+        - mcp:marketing_studio:route_marketing_request
+        - mcp:marketing_studio:prepare_marketing_campaign
+        - mcp:marketing_studio:approve_marketing_campaign
+        - mcp:marketing_studio:get_marketing_campaign
+        - mcp:marketing_studio:resolve_marketing_artifact
+        - mcp:marketing_studio:get_marketing_publish_capabilities
+        - mcp:marketing_studio:publish_marketing_artifact
+  - name: Poppy
+    team: Marketing
+    computer: off
+    soul: { file: poppy.md }
+    tools: { allow: [] }
+  - name: Finch
+    team: Marketing
+    computer: off
+    soul: { file: finch.md }
+    tools:
+      allow:
+        - mcp:marketing_studio:get_marketing_campaign
+        - mcp:marketing_studio:generate_marketing_images
+  - name: Momo
+    team: Marketing
+    computer: off
+    soul: { file: momo.md }
+    tools:
+      allow:
+        - mcp:marketing_studio:get_marketing_campaign
+        - mcp:marketing_studio:generate_marketing_video
