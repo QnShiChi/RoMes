@@ -9,6 +9,10 @@ import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
 import { generateMarketingSpeech, resolveGeminiApiKey } from "./speech-engine.ts";
 import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
+import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
+import { filterCandidates } from "./product-images/image-quality-filter.ts";
+import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
+import type { ProductImageCandidate } from "./product-images/types.ts";
 
 export interface ImagePromptSpec {
   prompt: string;
@@ -46,6 +50,8 @@ export interface GenerateImagesOptions {
   baseUrl?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  imageSearcher?: ProductImageSearcher;
+  imageDownloader?: ProductImageDownloader;
 }
 
 export interface MarketingPostDraft {
@@ -590,32 +596,82 @@ export async function generateMarketingImages(
 
   const prompts = input.prompts.slice(0, 6);
 
-  const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
+  if (options.baseUrl) {
+    const baseUrl = options.baseUrl;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
 
-  const images: GeneratedMarketingImage[] = [];
-  const failed: Array<{ index: number; prompt: string; error: string }> = [];
+    const images: GeneratedMarketingImage[] = [];
+    const failed: Array<{ index: number; prompt: string; error: string }> = [];
 
-  const settled = await Promise.allSettled(
-    prompts.map((spec, idx) =>
-      fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries }),
-    ),
-  );
+    const settled = await Promise.allSettled(
+      prompts.map((spec, idx) =>
+        fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries }),
+      ),
+    );
 
-  settled.forEach((item, idx) => {
-    if (item.status === "fulfilled") {
-      images.push(item.value);
-    } else {
-      failed.push({
-        index: idx + 1,
-        prompt: prompts[idx]?.prompt ?? "",
-        error: item.reason instanceof Error ? item.reason.message : String(item.reason),
-      });
+    settled.forEach((item, idx) => {
+      if (item.status === "fulfilled") {
+        images.push(item.value);
+      } else {
+        failed.push({
+          index: idx + 1,
+          prompt: prompts[idx]?.prompt ?? "",
+          error: item.reason instanceof Error ? item.reason.message : String(item.reason),
+        });
+      }
+    });
+
+    return { campaignSlug, campaignDir, images, failed };
+  }
+
+  const searcher = options.imageSearcher ?? new ProductImageSearcher();
+  const downloader = options.imageDownloader ?? new ProductImageDownloader();
+
+  const primaryQuery =
+    prompts[0]?.prompt?.trim() || campaignSlug.replace(/-/g, " ");
+
+  try {
+    let allCandidates: ProductImageCandidate[] = await searcher.search(primaryQuery).catch(() => []);
+    if (allCandidates.length < prompts.length * 3 && prompts.length > 1) {
+      for (let i = 1; i < prompts.length; i++) {
+        const extraQuery = prompts[i]?.prompt?.trim();
+        if (extraQuery && extraQuery !== primaryQuery) {
+          const extra = await searcher.search(extraQuery).catch(() => []);
+          allCandidates = allCandidates.concat(extra);
+        }
+      }
     }
-  });
 
-  return { campaignSlug, campaignDir, images, failed };
+    const cleanCandidates = filterCandidates(allCandidates);
+    const downloaded = await downloader.downloadExact(
+      cleanCandidates,
+      campaignDir,
+      prompts.length,
+    );
+
+    const images: GeneratedMarketingImage[] = downloaded.map((item, idx) => ({
+      index: item.index,
+      label: prompts[idx]?.label?.trim() || item.label,
+      prompt: prompts[idx]?.prompt?.trim() || primaryQuery,
+      filePath: item.filePath,
+      url: item.url,
+      mimeType: item.mimeType,
+      width: item.width,
+      height: item.height,
+      bytes: item.bytes,
+    }));
+
+    return { campaignSlug, campaignDir, images, failed: [] };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const failed = prompts.map((p, idx) => ({
+      index: idx + 1,
+      prompt: p.prompt,
+      error: errorMsg,
+    }));
+    return { campaignSlug, campaignDir, images: [], failed };
+  }
 }
 
 export async function saveMarketingDraft(

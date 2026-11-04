@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
+import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
 import {
   detectImageFormat,
   distributeScriptToScenes,
@@ -326,5 +328,51 @@ Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang tr�
     expect(result.images).toHaveLength(1);
     expect(fluxHit).toBe(true);
     expect(existsSync(result.images[0]!.filePath)).toBe(true);
+  });
+
+  it("generates marketing images by searching and downloading real product photos without API keys", async () => {
+    const root = makeTempDir();
+    const mockHtml = `
+      <div class="imgpt">
+        <a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.example.com/product-1.jpg&quot;,&quot;t&quot;:&quot;Keychron Q1 Official&quot;,&quot;ow&quot;:1200,&quot;oh&quot;:800}"></a>
+        <a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.example.com/product-2.jpg&quot;,&quot;t&quot;:&quot;Keychron Q1 Layout&quot;,&quot;ow&quot;:1920,&quot;oh&quot;:1080}"></a>
+      </div>
+    `;
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("bing.com")) {
+        return {
+          ok: true,
+          text: async () => mockHtml,
+        };
+      }
+      return {
+        ok: true,
+        arrayBuffer: async () =>
+          VALID_JPEG.buffer.slice(VALID_JPEG.byteOffset, VALID_JPEG.byteOffset + VALID_JPEG.byteLength),
+      };
+    });
+
+    const searcher = new ProductImageSearcher(mockFetch as unknown as typeof fetch);
+    const downloader = new ProductImageDownloader(mockFetch as unknown as typeof fetch);
+
+    const result = await generateMarketingImages(
+      {
+        campaignSlug: "keychron-q1",
+        prompts: [
+          { prompt: "Keychron Q1 Pro mechanical keyboard official", label: "Hero" },
+          { prompt: "Keychron Q1 Pro switch layout", label: "Detail" },
+        ],
+      },
+      { assetsRoot: root, imageSearcher: searcher, imageDownloader: downloader },
+    );
+
+    expect(result.images).toHaveLength(2);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
+    expect(existsSync(result.images[1]!.filePath)).toBe(true);
+    expect(result.images[0]!.label).toBe("Hero");
+    expect(result.images[1]!.label).toBe("Detail");
+    expect(result.images[0]!.url).toBe("https://cdn.example.com/product-1.jpg");
+    expect(result.images[1]!.url).toBe("https://cdn.example.com/product-2.jpg");
   });
 });
