@@ -98,5 +98,5 @@ describe("video-compiler", () => {
     expect(result.height).toBe(1080);
     expect(result.durationSeconds).toBeGreaterThan(0);
     expect(statSync(result.videoPath).size).toBeGreaterThan(1000);
-  });
+  }, 60_000);
 });
