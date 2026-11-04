@@ -3,6 +3,29 @@ import { describe, expect, it } from "vitest";
 import { assessMarketingBrief } from "./brief.ts";
 import { routeMarketingIntent } from "./intent.ts";
 
+const socialSources = {
+  contentType: "user",
+  topic: "user",
+  goal: "user",
+  audience: "user",
+  platform: "user",
+  style: "user",
+  callToAction: "user",
+  imageCount: "user",
+} as const;
+
+const videoSources = {
+  contentType: "proposed_default",
+  topic: "user",
+  goal: "user",
+  audience: "user",
+  platform: "user",
+  style: "user",
+  targetDurationSeconds: "user",
+  callToAction: "user",
+  imageCount: "proposed_default",
+} as const;
+
 describe("marketing consultation", () => {
   it("asks for every missing production decision without approving work for video", () => {
     const result = assessMarketingBrief({ topic: "AI Agent", contentType: "video_campaign" });
@@ -26,6 +49,7 @@ describe("marketing consultation", () => {
       style: "thương mại chuyên sâu",
       callToAction: "Bình luận góc nhìn của bạn",
       imageCount: 3,
+      fieldSources: socialSources,
     });
     expect(result).toMatchObject({
       complete: true,
@@ -47,6 +71,7 @@ describe("marketing consultation", () => {
       style: "modern tech",
       targetDurationSeconds: 60.2,
       callToAction: "Đăng ký demo",
+      fieldSources: videoSources,
     })).toMatchObject({
       complete: true,
       brief: { topic: "AI Agent", platform: "tiktok", targetDurationSeconds: 60 },
@@ -63,8 +88,84 @@ describe("marketing consultation", () => {
       style: "modern tech",
       targetDurationSeconds: 0,
       callToAction: "Đăng ký demo",
+      fieldSources: videoSources,
     });
     expect(result).toMatchObject({ complete: false, missingFields: ["targetDurationSeconds"] });
+  });
+
+  it("keeps user values separate from proposed defaults", () => {
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Cuộc đua AI của Big Tech",
+      goal: "Tăng tương tác",
+      audience: "Kỹ sư và sinh viên IT",
+      platform: "Facebook",
+      style: "Phân tích dễ hiểu",
+      callToAction: "Bình luận quan điểm của bạn",
+      imageCount: 5,
+      fieldSources: {
+        ...socialSources,
+        goal: "proposed_default",
+        audience: "proposed_default",
+        platform: "proposed_default",
+        style: "proposed_default",
+        callToAction: "proposed_default",
+      },
+    });
+
+    expect(result).toMatchObject({
+      complete: true,
+      sources: {
+        topic: "user",
+        goal: "proposed_default",
+        imageCount: "user",
+      },
+    });
+  });
+
+  it("refuses a complete-looking brief whose values have no provenance", () => {
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Cuộc đua AI",
+      goal: "Tăng tương tác",
+      audience: "Người quan tâm công nghệ",
+      platform: "Facebook",
+      style: "Chuyên gia",
+      callToAction: "Bình luận",
+    });
+
+    expect(result).toMatchObject({
+      complete: false,
+      missingAttribution: [
+        "topic",
+        "goal",
+        "audience",
+        "platform",
+        "style",
+        "callToAction",
+        "contentType",
+      ],
+    });
+  });
+
+  it("marks an omitted image count as a proposed one-image default", () => {
+    const { imageCount: _imageCount, ...withoutImageCount } = socialSources;
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Cuộc đua AI",
+      goal: "Tăng tương tác",
+      audience: "Người quan tâm công nghệ",
+      platform: "Facebook",
+      style: "Chuyên gia",
+      callToAction: "Bình luận",
+      fieldSources: withoutImageCount,
+    });
+
+    expect(result).toMatchObject({
+      complete: true,
+      brief: { imageCount: 1 },
+      sources: { imageCount: "proposed_default" },
+    });
   });
 });
 

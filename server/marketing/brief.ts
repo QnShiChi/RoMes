@@ -8,6 +8,7 @@ export interface MarketingBriefInput {
   callToAction?: string;
   contentType?: "social_post" | "video_campaign";
   imageCount?: number;
+  fieldSources?: MarketingBriefSources;
 }
 
 export interface MarketingBrief {
@@ -22,6 +23,10 @@ export interface MarketingBrief {
   imageCount: number;
 }
 
+export type FieldSource = "user" | "proposed_default" | "confirmed";
+export type MarketingBriefSourceField = keyof MarketingBrief;
+export type MarketingBriefSources = Partial<Record<MarketingBriefSourceField, FieldSource>>;
+
 export type MarketingBriefField =
   | "topic"
   | "goal"
@@ -32,8 +37,13 @@ export type MarketingBriefField =
   | "callToAction";
 
 export type MarketingBriefAssessment =
-  | { complete: false; missingFields: MarketingBriefField[]; questions: string[] }
-  | { complete: true; brief: MarketingBrief };
+  | {
+      complete: false;
+      missingFields: MarketingBriefField[];
+      missingAttribution: MarketingBriefSourceField[];
+      questions: string[];
+    }
+  | { complete: true; brief: MarketingBrief; sources: MarketingBriefSources };
 
 const VIDEO_FIELDS: MarketingBriefField[] = [
   "topic",
@@ -52,6 +62,18 @@ const SOCIAL_POST_FIELDS: MarketingBriefField[] = [
   "platform",
   "style",
   "callToAction",
+];
+
+const SOURCE_FIELDS: MarketingBriefSourceField[] = [
+  "topic",
+  "goal",
+  "audience",
+  "platform",
+  "style",
+  "callToAction",
+  "contentType",
+  "imageCount",
+  "targetDurationSeconds",
 ];
 
 const QUESTIONS: Record<MarketingBriefField, string> = {
@@ -77,7 +99,8 @@ export function assessMarketingBrief(input: MarketingBriefInput): MarketingBrief
       ? Math.round(input.targetDurationSeconds!)
       : undefined;
 
-  const imageCount = Number.isFinite(input.imageCount) && input.imageCount! > 0
+  const hasValidImageCount = Number.isFinite(input.imageCount) && input.imageCount! > 0;
+  const imageCount = hasValidImageCount
     ? Math.min(12, Math.max(1, Math.round(input.imageCount!)))
     : 1;
 
@@ -95,10 +118,23 @@ export function assessMarketingBrief(input: MarketingBriefInput): MarketingBrief
 
   const requiredFields = contentType === "social_post" ? SOCIAL_POST_FIELDS : VIDEO_FIELDS;
   const missingFields = requiredFields.filter((field) => normalized[field] === undefined);
+  const sources: MarketingBriefSources = {
+    ...input.fieldSources,
+    ...(!input.contentType ? { contentType: "proposed_default" as const } : {}),
+    ...(!hasValidImageCount ? { imageCount: "proposed_default" as const } : {}),
+  };
+  const missingAttribution = SOURCE_FIELDS.filter(
+    (field) => normalized[field] !== undefined && sources[field] === undefined,
+  );
 
-  if (missingFields.length > 0) {
-    return { complete: false, missingFields, questions: missingFields.map((field) => QUESTIONS[field]) };
+  if (missingFields.length > 0 || missingAttribution.length > 0) {
+    return {
+      complete: false,
+      missingFields,
+      missingAttribution,
+      questions: missingFields.map((field) => QUESTIONS[field]),
+    };
   }
 
-  return { complete: true, brief: normalized as MarketingBrief };
+  return { complete: true, brief: normalized as MarketingBrief, sources };
 }
