@@ -16,6 +16,7 @@ describe("RoMes marketing swarm team file", () => {
       allow: [
         "native:*",
         "mcp:marketing_studio:get_marketing_campaign",
+        "mcp:marketing_studio:get_marketing_post",
         "mcp:marketing_studio:generate_marketing_images",
       ],
     });
@@ -27,6 +28,10 @@ describe("RoMes marketing swarm team file", () => {
       ],
     });
     expect(byName.get("RoMes")?.tools?.allow).not.toContain("mcp:marketing_studio:generate_marketing_video");
+    expect(byName.get("RoMes")?.tools?.allow).toEqual(expect.arrayContaining([
+      "mcp:marketing_studio:save_marketing_post",
+      "mcp:marketing_studio:get_marketing_post",
+    ]));
   });
 
   it("keeps publishing and rendering in different roles", () => {
@@ -50,12 +55,18 @@ describe("RoMes marketing swarm team file", () => {
     expect(momo).toContain("CAMPAIGN_ID:");
   });
 
-  it("enforces autonomous execution without redundant user questions", () => {
+  it("requires balanced consultation and a persisted post before visual work", () => {
     const poppy = readFileSync(fileURLToPath(new URL("./poppy.md", import.meta.url)), "utf8");
     const romes = readFileSync(fileURLToPath(new URL("./romes.md", import.meta.url)), "utf8");
+    const finch = readFileSync(fileURLToPath(new URL("./finch.md", import.meta.url)), "utf8");
 
-    expect(poppy).toMatch(/tuyệt đối không hỏi|không hỏi lại|tự chủ/i);
-    expect(romes).toMatch(/gọi luôn approve_marketing_campaign|không dừng lại hỏi xin duyệt|tự động gọi.*approve_marketing_campaign/i);
-    expect(romes).toMatch(/tuyệt đối không tự ý bịa đặt chủ đề|khi người dùng chưa cung cấp chủ đề/i);
+    expect(romes).toContain("ask_user");
+    expect(romes).toMatch(/xác nhận brief|duyệt revision/i);
+    expect(romes).toContain("save_marketing_post");
+    expect(romes).toMatch(/Poppy.*trước.*Finch|chỉ giao Finch sau/is);
+    expect(romes).not.toMatch(/gọi luôn approve_marketing_campaign|không dừng lại hỏi xin duyệt/i);
+    expect(poppy).toContain("visualPrompts");
+    expect(finch).toContain("POST_ARTIFACT_ID:");
+    expect(finch).toContain("get_marketing_post");
   });
 });
