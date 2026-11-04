@@ -38,7 +38,7 @@ export class AgentDesktopRunner {
   }
 
   async snapshot(app: string = "chrome"): Promise<SnapshotNode> {
-    const res = await this.executor.run("snapshot", ["--app", app, "--skeleton", "-i", "--compact"]);
+    const res = await this.executor.run("snapshot", ["--app", app, "-i", "--compact"]);
     if (!res.ok || !res.data) {
       throw new Error(res.error?.message ?? "Snapshot failed");
     }

@@ -27,7 +27,11 @@ export class FacebookPoster implements SocialPoster {
         };
       }
 
-      await this.runner.clickRef(fbTab);
+      try {
+        await this.runner.clickRef(fbTab);
+      } catch {
+        // Tab may already be active or requires compositor focus on Wayland
+      }
 
       const composerBtn = await this.runner.findActionable({
         role: "button",
