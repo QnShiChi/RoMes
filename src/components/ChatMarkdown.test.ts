@@ -714,6 +714,7 @@ describe("message-scoped file targets", () => {
     expect(localFilePath("//cdn.example.test/report.pdf")).toBeNull();
     expect(localFilePath("/C:/posix/report.pdf")).toBe("/C:/posix/report.pdf");
     expect(localFilePath("file:///C:/Users/Maus/report.pdf")).toBe("C:/Users/Maus/report.pdf");
+    expect(localFilePath("sandbox:/home/cua/workspace/image-1.jpg")).toBe("/home/cua/workspace/image-1.jpg");
     expect(localFilePath("https://example.test/report.pdf")).toBeNull();
     expect(localFilePath("#section")).toBeNull();
     expect(localFilePath("javascript:alert(1)")).toBeNull();
@@ -724,6 +725,7 @@ describe("message-scoped file targets", () => {
     expect(chatUrlTransform("C:/Users/Maus/report.md")).toBe("C:/Users/Maus/report.md");
     expect(chatUrlTransform("\\\\server\\share\\report.md")).toBe("\\\\server\\share\\report.md");
     expect(chatUrlTransform("C:%5CUsers%5CMaus%5Crelease%20notes.md")).toBe("C:\\Users\\Maus\\release%20notes.md");
+    expect(chatUrlTransform("sandbox:/home/cua/workspace/image-1.jpg")).toBe("/home/cua/workspace/image-1.jpg");
     expect(chatUrlTransform("javascript:alert(1)")).toBe("");
     expect(chatUrlTransform("https://example.test/report.md")).toBe("https://example.test/report.md");
   });

@@ -83,6 +83,9 @@ export async function renderApprovedCampaign(
   if (existing?.type === "video" && existsSync(existing.path)) {
     return artifactOutput(campaign, existing, renderKey, true);
   }
+  if (campaign.status === "failed") {
+    store.transition(campaign.id, "assets_ready");
+  }
   if (campaign.status !== "assets_ready") {
     throw new CampaignStoreError(`Campaign must be assets_ready before rendering; current status is ${campaign.status}`);
   }

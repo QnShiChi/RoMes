@@ -12,8 +12,8 @@ const visualPromptSchema = z.object({
   subject: z.string().trim().min(1).max(500),
   context: z.string().trim().min(1).max(500),
   action: z.string().trim().min(1).max(500),
-  requiredTerms: z.array(z.string().trim().min(1).max(100)).min(1).max(12),
-  excludedTerms: z.array(z.string().trim().min(1).max(100)).max(20),
+  requiredTerms: z.array(z.string().trim().min(1).max(100)).max(12).default([]),
+  excludedTerms: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
   aspectRatio: z.enum(["1:1", "4:5", "16:9"]),
 }).strict();
 
@@ -22,11 +22,11 @@ const marketingPostSchema = z.object({
   revision: z.number().int().positive(),
   platform: z.string().trim().min(1),
   headline: z.string().trim().min(1).max(300),
-  body: z.string().trim().min(1).max(20_000),
-  callToAction: z.string().trim().min(1).max(1_000),
-  hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_]+$/u)).max(20),
-  caption: z.string().trim().min(1).max(25_000),
-  visualPrompts: z.array(visualPromptSchema).min(1).max(12),
+  body: z.string().trim().min(1).max(25_000),
+  callToAction: z.string().trim().max(1_000).default(""),
+  hashtags: z.array(z.string().trim()).max(20).default([]),
+  caption: z.string().trim().max(30_000).default(""),
+  visualPrompts: z.array(visualPromptSchema).max(12).default([]),
 }).strict();
 
 export type MarketingPostInput = z.infer<typeof marketingPostSchema>;
@@ -80,6 +80,11 @@ export function saveMarketingPostArtifact(
   if (!relativeDirectory || relativeDirectory.startsWith("..") || isAbsolute(relativeDirectory)) {
     throw new CampaignStoreError("Campaign artifact directory is invalid");
   }
+  if (!post.caption.trim()) {
+    const ctaPart = post.callToAction && post.callToAction !== "Không có CTA" ? `\n\n${post.callToAction}` : "";
+    const tagPart = post.hashtags.length ? `\n\n${post.hashtags.join(" ")}` : "";
+    post.caption = `${post.headline}\n\n${post.body}${ctaPart}${tagPart}`;
+  }
   const serialized = `${JSON.stringify(post, null, 2)}\n`;
   const digest = createHash("sha256").update(serialized).digest("hex");
   const path = join(campaignDirectory, `post-r${post.revision}-${digest.slice(0, 16)}.json`);
@@ -102,19 +107,25 @@ export function saveMarketingPostArtifact(
 export function readMarketingPostArtifact(
   store: CampaignStore,
   campaignId: string,
-  artifactId: string,
+  artifactId?: string,
 ): SavedMarketingPost {
   const campaign = store.get(campaignId);
-  const artifact = campaign.artifacts.find((candidate) =>
-    candidate.id === artifactId && candidate.type === "script" && candidate.metadata.kind === "social_post");
+  const targetId = artifactId?.trim();
+  const artifact = targetId && targetId !== "latest"
+    ? campaign.artifacts.find((candidate) =>
+        candidate.id === targetId && candidate.type === "script" && candidate.metadata.kind === "social_post")
+    : latestMarketingPostArtifact(store, campaignId);
   if (!artifact || !existsSync(artifact.path)) {
-    throw new CampaignStoreError(`Social post artifact not found: ${artifactId}`);
+    throw new CampaignStoreError(
+      targetId && targetId !== "latest"
+        ? `Social post artifact not found: ${targetId}`
+        : `Campaign "${campaignId}" has no saved social post artifact yet. Poppy must create and save the post first.`,
+    );
   }
   try {
     const post = marketingPostSchema.parse(JSON.parse(readFileSync(artifact.path, "utf8")));
-    if (post.campaignId !== campaign.id || post.revision !== campaign.revision) {
-      throw new Error("artifact campaign or revision does not match");
-    }
+    post.campaignId = campaign.id;
+    post.revision = campaign.revision;
     return { post, artifact };
   } catch (error) {
     throw new CampaignStoreError(
@@ -125,9 +136,14 @@ export function readMarketingPostArtifact(
 
 export function latestMarketingPostArtifact(store: CampaignStore, campaignId: string): CampaignArtifact | null {
   const campaign = store.get(campaignId);
-  return campaign.artifacts.findLast((candidate) =>
+  const matched = campaign.artifacts.findLast((candidate) =>
     candidate.type === "script" &&
     candidate.metadata.kind === "social_post" &&
     candidate.metadata.revision === campaign.revision &&
+    existsSync(candidate.path));
+  if (matched) return matched;
+  return campaign.artifacts.findLast((candidate) =>
+    candidate.type === "script" &&
+    candidate.metadata.kind === "social_post" &&
     existsSync(candidate.path)) ?? null;
 }

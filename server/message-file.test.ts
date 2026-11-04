@@ -97,6 +97,8 @@ describe("message-linked files", () => {
     )).toBe(true);
     expect(messageReferencesFile("<file:///Users/milind/report.md>", "/Users/milind/report.md"))
       .toBe(true);
+    expect(messageReferencesFile("[Video](sandbox:/home/cua/workspace/video.mp4)", "/home/cua/workspace/video.mp4"))
+      .toBe(true);
 
     expect(messageReferencesFile(
       "[Open it](C:/Users/Maus/drafts/../report.md)",

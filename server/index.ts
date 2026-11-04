@@ -4018,7 +4018,7 @@ const coordinator: Coordinator = createCoordinator({
           name: teammateResultRow(threadLanguage(parent.threadId), child, bot?.name, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
           ok: child.status === "completed" && !problem,
           ...(child.status === "completed" && !problem && child.result.trim()
-            ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}),
+            ? { output: redactSecretsInText(child.result.trim()).slice(0, 20_000) } : {}),
         },
         ...(child.groupId ? { comm: { groupId: child.groupId, threadId: child.threadId, withBotId: child.botId,
           withName: bot?.name ?? "Teammate", withColor: bot?.color ?? "blue" } }
@@ -8542,7 +8542,7 @@ async function startTurn(
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
       const recalled = autoRecallPrompt(bot, threadId, resolvedImages.text, {
         // A routine run starts fresh, and a webhook is untrusted: neither pulls earlier conversations in.
-        conversations: commsDepth === 0 && !coordinationNode && !opts?.automationSource && !opts?.unattended,
+        conversations: commsDepth === 0 && !coordinationNode && !opts?.automationSource && !opts?.unattended && bot.section !== "Marketing",
         userName: userNameFor(threadId),
       });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {

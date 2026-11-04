@@ -27,11 +27,11 @@ export function buildBeatMotionFilter(motion: CameraMotion, opt: BeatMotionFilte
       break;
     case "pan_left":
       zoomExpr = "1.12";
-      xExpr = "'(1-on/d)*(iw-iw/zoom)'";
+      xExpr = `'(1-on/${frames})*(iw-iw/zoom)'`;
       break;
     case "pan_right":
       zoomExpr = "1.12";
-      xExpr = "'(on/d)*(iw-iw/zoom)'";
+      xExpr = `'(on/${frames})*(iw-iw/zoom)'`;
       break;
     case "static_drift":
       zoomExpr = "min(zoom+0.0004,1.05)";
@@ -71,9 +71,16 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
     const cues: SubtitleCue[] = [];
     let currentMs = 0;
 
+    const totalBeats = Math.max(1, input.manifest.beats.length);
+    const targetMs = (input.manifest.targetDurationSeconds || 60) * 1000;
+    const defaultBeatMs = Math.max(2000, Math.round(targetMs / totalBeats));
+
     for (let i = 0; i < input.manifest.beats.length; i++) {
       const beat = input.manifest.beats[i];
-      const durationSec = Math.max(1.5, beat.durationEstimateMs / 1000);
+      const estimateMs = Number.isFinite(beat.durationEstimateMs) && Number(beat.durationEstimateMs) > 0
+        ? Number(beat.durationEstimateMs)
+        : defaultBeatMs;
+      const durationSec = Math.max(1.5, Math.round(estimateMs) / 1000);
       const frames = Math.max(fps * 2, Math.round(durationSec * fps));
       const endMs = currentMs + Math.round(durationSec * 1000);
 
@@ -85,21 +92,24 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
       });
       currentMs = endMs;
 
-      const imgPath = beat.imagePath && existsSync(beat.imagePath)
+      let imgPath = beat.imagePath && existsSync(beat.imagePath) && statSync(beat.imagePath).size > 100
         ? beat.imagePath
-        : join(tempDir, `placeholder-${i}.png`);
+        : "";
 
-      if (!existsSync(imgPath)) {
+      if (!imgPath) {
+        imgPath = join(tempDir, `placeholder-${i}.png`);
         execFileSync("ffmpeg", [
+          "-loglevel", "error",
           "-y", "-f", "lavfi", "-i", `color=c=0x111625:s=${width}x${height}`,
           "-frames:v", "1", imgPath,
-        ]);
+        ], { timeout: 30_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" });
       }
 
       const segmentMp4 = join(tempDir, `beat-${i}.mp4`);
       const filter = buildBeatMotionFilter(beat.cameraMotion, { frames, width, height, fps });
 
       execFileSync("ffmpeg", [
+        "-loglevel", "error",
         "-y",
         "-loop", "1",
         "-i", imgPath,
@@ -109,7 +119,7 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
         "-preset", "veryfast",
         "-r", fps.toString(),
         segmentMp4,
-      ], { timeout: 60_000, stdio: "pipe" });
+      ], { timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" });
 
       concatEntries.push(`file '${segmentMp4}'`);
     }
@@ -119,13 +129,14 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
 
     const silentVideo = join(tempDir, "silent.mp4");
     execFileSync("ffmpeg", [
+      "-loglevel", "error",
       "-y",
       "-f", "concat",
       "-safe", "0",
       "-i", concatTxt,
       "-c", "copy",
       silentVideo,
-    ], { timeout: 60_000, stdio: "pipe" });
+    ], { timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" });
 
     const assFile = join(tempDir, "subtitles.ass");
     writeFileSync(assFile, generateAssSubtitles(cues, { width, height }), "utf8");
@@ -134,6 +145,7 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
     execFileSync("ffmpeg", [
+      "-loglevel", "error",
       "-y",
       "-i", silentVideo,
       "-i", input.audioPath,
@@ -144,7 +156,7 @@ export async function renderBeatMotionVideo(input: RenderMotionVideoInput): Prom
       "-b:a", "192k",
       "-shortest",
       input.outputPath,
-    ], { timeout: 120_000, stdio: "pipe" });
+    ], { timeout: 120_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" });
 
     const stats = statSync(input.outputPath);
     return {

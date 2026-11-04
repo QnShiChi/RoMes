@@ -11,7 +11,9 @@ const VALID_WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 
 const INVALID_HTML = Buffer.from("<html><body>Error 404</body></html>");
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  const copy = new Uint8Array(buf.byteLength);
+  copy.set(buf);
+  return copy.buffer;
 }
 
 describe("ProductImageDownloader", () => {

@@ -108,13 +108,20 @@ export function assessMarketingBrief(input: MarketingBriefInput): MarketingBrief
     ? Math.min(12, Math.max(1, Math.round(input.imageCount!)))
     : 1;
 
+  const rawCta = clean(input.callToAction);
+  const isNegativeCta = Boolean(rawCta && /^(ko|không|khong|none|no|0)$/i.test(rawCta));
+  const defaultCta = contentType === "social_post" ? "Chia sẻ cảm nghĩ của bạn bên dưới bài viết" : "Tìm hiểu thêm";
+  const callToAction = isNegativeCta
+    ? "Không có CTA"
+    : (rawCta || (input.fieldSources?.callToAction === "proposed_default" ? defaultCta : undefined));
+
   const normalized: Partial<MarketingBrief> = {
     topic: clean(input.topic),
     goal: clean(input.goal),
     audience: clean(input.audience),
     platform: clean(input.platform)?.toLowerCase(),
     style: clean(input.style),
-    callToAction: clean(input.callToAction),
+    callToAction,
     contentType,
     imageCount,
     ...(contentType === "video_campaign" ? { targetDurationSeconds: duration } : {}),

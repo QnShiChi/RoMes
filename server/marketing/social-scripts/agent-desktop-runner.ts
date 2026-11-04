@@ -43,8 +43,8 @@ export class AgentDesktopRunner {
       if (res.ok && res.data) {
         const data = res.data as { apps: Array<{ name: string }> };
         const names = data.apps.map((a) => a.name.toLowerCase());
-        if (names.some((n) => n.includes("brave"))) return "brave";
         if (names.some((n) => n.includes("chrome"))) return "chrome";
+        if (names.some((n) => n.includes("brave"))) return "brave";
       }
     } catch {
       // fallback

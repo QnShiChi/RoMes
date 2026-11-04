@@ -13,7 +13,6 @@ bots:
       allow:
         - native:*
         - mcp:agents:coordinate_bots
-        - mcp:agents:attach_file
         - mcp:marketing_studio:route_marketing_request
         - mcp:marketing_studio:prepare_marketing_campaign
         - mcp:marketing_studio:approve_marketing_campaign

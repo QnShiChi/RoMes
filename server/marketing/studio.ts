@@ -7,7 +7,7 @@ import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
 import { legacyScenesToBeatManifest, type CampaignBeatManifest, type NarrativeBeat } from "./beat-schema.ts";
 import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
 import { generateMarketingSpeech, resolveGeminiApiKey } from "./speech-engine.ts";
-import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
+import { type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
 import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
 import { filterCandidates } from "./product-images/image-quality-filter.ts";
@@ -79,18 +79,8 @@ export interface SaveDraftInput {
   posts: MarketingPostDraft[];
 }
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:7860/prompt";
 const DEFAULT_TIMEOUT_MS = 25_000;
 const DEFAULT_RETRIES = 1;
-
-const CURATED_TECH_IMAGES = [
-  "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1080&h=1920&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?w=1080&h=1920&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1080&h=1920&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1080&h=1920&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1531403009284-440f080d1e12?w=1080&h=1920&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1518770660439-4636190af475?w=1080&h=1920&fit=crop&q=80",
-];
 
 function generateFallbackGradientImage(outputPath: string, width: number, height: number, index: number): boolean {
   try {
@@ -586,6 +576,19 @@ async function fetchSingleImage(
   throw new Error(lastError);
 }
 
+export function cleanSearchQuery(raw: string, campaignSlug?: string): string {
+  let text = raw.trim();
+  text = text.replace(/(?:;\s*)?(?:requiredTerms|excludedTerms|aspectRatio|negativeFilter|resolution|ratio)\s*[:=][^;\n]*/gi, " ");
+  text = text.replace(/[;"'[\]{}()]/g, " ");
+  text = text.replace(/\b(?:watermark|cartoon|distorted|generic stock)\b/gi, " ");
+  text = text.replace(/,\s*,/g, ",").replace(/\s+/g, " ").trim();
+  text = text.replace(/^[,.\s]+|[,.\s]+$/g, "");
+  if (!text && campaignSlug) {
+    text = campaignSlug.replace(/-/g, " ");
+  }
+  return text;
+}
+
 export async function generateMarketingImages(
   input: GenerateImagesInput,
   options: GenerateImagesOptions,
@@ -594,7 +597,7 @@ export async function generateMarketingImages(
   const campaignDir = join(options.assetsRoot, campaignSlug);
   mkdirSync(campaignDir, { recursive: true });
 
-  const prompts = input.prompts.slice(0, 6);
+  const prompts = input.prompts;
 
   if (options.baseUrl) {
     const baseUrl = options.baseUrl;
@@ -628,22 +631,26 @@ export async function generateMarketingImages(
   const searcher = options.imageSearcher ?? new ProductImageSearcher();
   const downloader = options.imageDownloader ?? new ProductImageDownloader();
 
-  const baseQuery =
-    prompts[0]?.prompt?.trim() || campaignSlug.replace(/-/g, " ");
-  const primaryQuery =
-    /\b(official|product|interface|hardware|software|launch|press|app)\b/i.test(baseQuery)
-      ? baseQuery
-      : `${baseQuery} official product`;
-
   try {
-    let allCandidates: ProductImageCandidate[] = await searcher.search(primaryQuery).catch(() => []);
-    if (allCandidates.length < prompts.length * 3 && prompts.length > 1) {
-      for (let i = 1; i < prompts.length; i++) {
-        const extraQuery = prompts[i]?.prompt?.trim();
-        if (extraQuery && extraQuery !== primaryQuery) {
-          const extra = await searcher.search(extraQuery).catch(() => []);
-          allCandidates = allCandidates.concat(extra);
-        }
+    let allCandidates: ProductImageCandidate[] = [];
+    const searchedQueries = new Set<string>();
+
+    for (const p of prompts) {
+      const rawPrompt = p?.prompt?.trim() || "";
+      const cleaned = cleanSearchQuery(rawPrompt, campaignSlug);
+      const query = cleaned || campaignSlug.replace(/-/g, " ");
+      if (query && !searchedQueries.has(query)) {
+        searchedQueries.add(query);
+        const candidates = await searcher.search(query).catch(() => []);
+        allCandidates = allCandidates.concat(candidates);
+      }
+    }
+
+    if (allCandidates.length < prompts.length * 2) {
+      const fallbackQuery = campaignSlug.replace(/-/g, " ");
+      if (!searchedQueries.has(fallbackQuery)) {
+        const fallback = await searcher.search(fallbackQuery).catch(() => []);
+        allCandidates = allCandidates.concat(fallback);
       }
     }
 
@@ -657,7 +664,7 @@ export async function generateMarketingImages(
     const images: GeneratedMarketingImage[] = downloaded.map((item, idx) => ({
       index: item.index,
       label: prompts[idx]?.label?.trim() || item.label,
-      prompt: prompts[idx]?.prompt?.trim() || primaryQuery,
+      prompt: prompts[idx]?.prompt?.trim() || campaignSlug,
       filePath: item.filePath,
       url: item.url,
       mimeType: item.mimeType,
@@ -948,8 +955,6 @@ export async function generateMarketingVideoWorkflow(
 
   const ratio = input.ratio || "9:16";
   const bgmTheme = input.bgmTheme || "tech";
-  const brandName = input.brandName || "RoMes AI";
-
   const rawScenes = Array.isArray(input.scenes) && input.scenes.length > 0 ? input.scenes : [
     { type: "hook" as const, title: campaignSlug.replace(/-/g, " ").toUpperCase(), durationMs: 4000 },
     { type: "features" as const, title: "Tính năng nổi bật", bulletPoints: ["Tối ưu hiệu suất vượt trội", "Tự động hóa thông minh"], durationMs: 5000 },
@@ -1051,10 +1056,10 @@ export async function generateMarketingVideoWorkflow(
         targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : Math.round(totalAudioMs / 1000),
         styleTheme: "retro_tech_newspaper",
         beats: input.beats.map((b, idx) => ({
+          ...b,
           beatIndex: idx + 1,
           visualPrompt: b.visualPrompt || b.narration || `Beat ${idx + 1}`,
           cameraMotion: b.cameraMotion || "slow_zoom_in",
-          ...b,
           durationEstimateMs: Number.isFinite(b.durationEstimateMs) && Number(b.durationEstimateMs) > 0
             ? Number(b.durationEstimateMs)
             : defaultBeatEstimateMs,

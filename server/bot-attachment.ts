@@ -1,5 +1,6 @@
 // The source opens through the message-file route's hardened resolver (realpath containment, O_NOFOLLOW, size cap) and is
 // copied into the private store, so the chat never reaches into a bot's workspace or VM home afterwards.
+import { existsSync, readdirSync } from "node:fs";
 import { basename, join, posix } from "node:path";
 import {
   extensionForFileMime,
@@ -78,7 +79,35 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   // A bot with a VM works in it: a relative path means its VM workspace first.
   const roots = input.guest ? [input.guest.host, ...input.roots] : input.roots;
   // A VM turn's tools never wrote to the host, so it gets roots only.
-  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn);
+  let file: OpenedMessageFile;
+  try {
+    file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn);
+  } catch (initialError) {
+    let fallbackPath: string | null = null;
+    const base = posix.basename(requested.replace(/\\/g, "/"));
+    for (const root of roots) {
+      const candidateMarketing = join(root, "marketing-assets");
+      if (existsSync(candidateMarketing)) {
+        try {
+          const entries = readdirSync(candidateMarketing, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const targetInDir = join(candidateMarketing, entry.name, base);
+            if (existsSync(targetInDir)) {
+              fallbackPath = targetInDir;
+              break;
+            }
+          }
+        } catch {}
+      }
+      if (fallbackPath) break;
+    }
+    if (fallbackPath) {
+      file = await openSource(fallbackPath, roots, undefined);
+    } else {
+      throw initialError;
+    }
+  }
   try {
     const mime = mimeFor(file.name);
     const name = displayNameFor(input.name, file.name);

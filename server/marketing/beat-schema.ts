@@ -18,10 +18,10 @@ export const collageStyleThemeSchema = z.enum([
 export type CollageStyleTheme = z.infer<typeof collageStyleThemeSchema>;
 
 export const narrativeBeatSchema = z.object({
-  beatIndex: z.number().int().positive(),
-  durationEstimateMs: z.number().int().positive(),
+  beatIndex: z.number().int().nonnegative().optional(),
+  durationEstimateMs: z.number().int().positive().optional(),
   narration: z.string().min(1),
-  visualPrompt: z.string().min(1),
+  visualPrompt: z.string().optional().default("collage scene"),
   cameraMotion: cameraMotionSchema.default("slow_zoom_in"),
   keywordHighlight: z.string().optional(),
   imagePath: z.string().optional(),
@@ -64,7 +64,7 @@ export function legacyScenesToBeatManifest(
 
   return {
     campaignSlug,
-    targetDurationSeconds: Math.round(beats.reduce((acc, b) => acc + b.durationEstimateMs, 0) / 1000),
+    targetDurationSeconds: Math.round(beats.reduce((acc, b) => acc + (b.durationEstimateMs ?? 4000), 0) / 1000),
     styleTheme: "retro_tech_newspaper",
     beats,
   };

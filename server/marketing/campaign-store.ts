@@ -204,7 +204,7 @@ const NEXT: Record<CampaignStatus, CampaignStatus[]> = {
   rendering: ["ready", "failed"],
   ready: ["publishing", "failed"],
   publishing: ["published", "failed"],
-  published: [],
+  published: ["publishing", "ready", "failed"],
   failed: ["approved", "assets_ready", "ready"],
 };
 
@@ -214,6 +214,7 @@ const LAST_VALID: Partial<Record<CampaignStatus, CampaignStatus>> = {
   rendering: "assets_ready",
   ready: "assets_ready",
   publishing: "ready",
+  published: "ready",
 };
 
 function normalizeCampaignSlug(raw: string): string {

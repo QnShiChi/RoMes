@@ -755,7 +755,10 @@ export function recallMatchTerm(term: string): string | null {
 export type SearchMode = "all" | "any";
 
 const RECALL_FILLER = new Set(
-  "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
+  ("about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just " +
+    "chào alo alô helo em anh chị tôi bạn mình cậu tớ ông bà chú bác cô bot ơi ạ nhé nha nhá nè nghe vâng dạ ừ ừm uh uhm oke oki okie giúp hộ cho đi nào gì đây đó được không ko khong thế vậy sao đâu chứ nữa luôn rồi " +
+    "về của và với là thì mà ở trong trên dưới như từ bởi tại lại ra vào lên xuống " +
+    "làm tạo một cái muốn cần hãy video clip").split(" "),
 );
 
 export function recallTerms(query: string): string[] {

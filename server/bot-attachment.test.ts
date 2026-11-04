@@ -108,6 +108,14 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
   });
+
+  it("finds file in marketing-assets subdirectory when guest or relative path is passed", async () => {
+    const assetsDir = join(WORK, "marketing-assets", "campaign-a");
+    mkdirSync(assetsDir, { recursive: true });
+    writeFileSync(join(assetsDir, "video.mp4"), Buffer.from("video bytes"));
+    const saved = await saveBotAttachment({ path: "/home/cua/workspace/video.mp4", roots: [WORK] });
+    expect(saved.attachment).toMatchObject({ kind: "file", name: "video.mp4" });
+  });
 });
 
 describe("saveBotAttachment for a file a turn saved outside its folders", () => {

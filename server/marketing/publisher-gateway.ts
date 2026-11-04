@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { CampaignStoreError, type CampaignStore } from "./campaign-store.ts";
+import { latestMarketingPostArtifact } from "./social-post-artifact.ts";
 
 export type PublishPlatform = "tiktok" | "facebook" | "x" | "linkedin" | "instagram";
 
@@ -33,7 +34,7 @@ export interface PublisherAdapter {
 
 export interface PublishRequest {
   campaignId: string;
-  artifactId: string;
+  artifactId?: string;
   platform: PublishPlatform;
   caption: string;
   idempotencyKey: string;
@@ -124,29 +125,65 @@ export function createPublisherGateway(
     },
 
     async publish(input) {
-      const campaign = store.get(input.campaignId);
+      let campaign = store.get(input.campaignId);
       const operationKey = `publish:${input.platform}:${input.idempotencyKey}`;
       const existing = store.findArtifactByOperation(campaign.id, operationKey);
       if (existing?.type === "publish_evidence" && existsSync(existing.path)) {
         return evidenceSchema.parse(JSON.parse(readFileSync(existing.path, "utf8"))) as PublishEvidence;
       }
-      if (campaign.status !== "ready") {
+      if ((campaign.status === "assets_ready" || campaign.status === "failed") && campaign.brief.contentType === "social_post") {
+        campaign = store.transition(campaign.id, "ready");
+      }
+      if (campaign.status !== "ready" && campaign.status !== "published") {
         throw new CampaignStoreError(`Campaign must be ready before publishing; current status is ${campaign.status}`);
       }
-      const targetArtifact = campaign.artifacts.find((artifact) => artifact.id === input.artifactId);
-      if (!targetArtifact || !existsSync(targetArtifact.path)) throw new CampaignStoreError(`Ready artifact not found: ${input.artifactId}`);
+      let targetArtifact = input.artifactId
+        ? campaign.artifacts.find((artifact) => artifact.id === input.artifactId)
+        : undefined;
+
+      if (!targetArtifact) {
+        if (campaign.brief.contentType === "social_post") {
+          targetArtifact = campaign.artifacts.find((artifact) => artifact.type === "image" && existsSync(artifact.path));
+        } else {
+          targetArtifact = campaign.artifacts.findLast((artifact) => artifact.type === "video" && existsSync(artifact.path));
+        }
+        if (!targetArtifact) {
+          targetArtifact = campaign.artifacts.findLast((artifact) => existsSync(artifact.path));
+        }
+      }
+      if (!targetArtifact || !existsSync(targetArtifact.path)) {
+        throw new CampaignStoreError(
+          input.artifactId
+            ? `Ready artifact not found: ${input.artifactId}`
+            : `No ready artifact found for campaign ${campaign.id}`
+        );
+      }
       const selected = (await available()).find((row) => row.capability.platform === input.platform);
       if (!selected) throw new PublisherGatewayError(`No configured publisher for ${input.platform}`);
 
       store.beginOperation(campaign.id, operationKey, "publish");
       store.transition(campaign.id, "publishing");
       try {
+        let finalCaption = input.caption;
+        if (campaign.brief.contentType === "social_post") {
+          const postArtifact = latestMarketingPostArtifact(store, campaign.id);
+          if (postArtifact && existsSync(postArtifact.path)) {
+            try {
+              const saved = JSON.parse(readFileSync(postArtifact.path, "utf8"));
+              if (saved.caption && (finalCaption.includes("[Phần nội dung") || finalCaption.includes("[nội dung") || finalCaption.length < 80)) {
+                finalCaption = saved.caption;
+              }
+            } catch {
+              // keep input.caption
+            }
+          }
+        }
         const imagePaths = campaign.artifacts.filter((a) => a.type === "image").map((a) => a.path);
         const raw = await selected.adapter.publish({
           platform: input.platform,
           videoPath: targetArtifact.type === "video" ? targetArtifact.path : undefined,
           imagePaths,
-          caption: input.caption,
+          caption: finalCaption,
           idempotencyKey: input.idempotencyKey,
         });
         const evidence = validateEvidence(raw, selected.capability);

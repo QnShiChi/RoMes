@@ -59,6 +59,9 @@ function referencedPath(
   if (!href || Buffer.byteLength(href) > 8_192 || href.includes("\0")) {
     throw statusError(400, "path must be a non-empty file link");
   }
+  if (/^sandbox:/i.test(href)) {
+    return referencedPath(href.slice("sandbox:".length), portableFileURL, allowForwardSlashUNC);
+  }
   // A Windows drive prefix or a UNC path is a local path, not a URL scheme or a protocol-relative URL.
   if (/^[a-z]:[\\/]/i.test(href) || href.startsWith("\\\\")) {
     return decodePathWithSuffixRemoved(href);
@@ -173,7 +176,7 @@ function renderedMarkdownTargets(markdown: string): string[] {
 export function messageFileTargets(text: string): string[] {
   return [...new Set(renderedMarkdownTargets(text))].filter((target) =>
     !target.startsWith("#") && !target.startsWith("//") &&
-    (/^[a-z]:[\\/]/i.test(target) || /^file:/i.test(target) || !/^[a-z][a-z\d+.-]*:/i.test(target)));
+    (/^[a-z]:[\\/]/i.test(target) || /^file:/i.test(target) || /^sandbox:/i.test(target) || !/^[a-z][a-z\d+.-]*:/i.test(target)));
 }
 
 /** Definitions are collected first: CommonMark lets them follow the reference. */

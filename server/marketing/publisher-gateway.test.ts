@@ -211,5 +211,26 @@ describe("publisher gateway", () => {
     expect(publishedInput.imagePaths).toContain(imgPath);
     expect(publishedInput.videoPath).toBeUndefined();
     expect(store.get(campaign.id).status).toBe("published");
+
+    const reRes = await gateway.publish({
+      campaignId: campaign.id,
+      platform: "facebook",
+      caption: "Social Post Updated Caption",
+      idempotencyKey: "sp-publish-2",
+    });
+    expect(reRes.platform).toBe("facebook");
+    expect(store.get(campaign.id).status).toBe("published");
+
+    // Retry after failure
+    store.transition(campaign.id, "failed");
+    expect(store.get(campaign.id).status).toBe("failed");
+    const retryRes = await gateway.publish({
+      campaignId: campaign.id,
+      platform: "facebook",
+      caption: "Social Post Retry",
+      idempotencyKey: "sp-publish-3",
+    });
+    expect(retryRes.platform).toBe("facebook");
+    expect(store.get(campaign.id).status).toBe("published");
   });
 });

@@ -71,6 +71,8 @@ describe("social post artifact", () => {
 
     expect(second.artifact.id).toBe(first.artifact.id);
     expect(readMarketingPostArtifact(store, post.campaignId, first.artifact.id).post).toEqual(post);
+    expect(readMarketingPostArtifact(store, post.campaignId).post).toEqual(post);
+    expect(readMarketingPostArtifact(store, post.campaignId, "latest").post).toEqual(post);
     expect(store.get(post.campaignId).status).toBe("scripting");
   });
 
@@ -92,5 +94,32 @@ describe("social post artifact", () => {
     const saved = saveMarketingPostArtifact(store, root, post);
     writeFileSync(saved.artifact.path, "{broken");
     expect(() => readMarketingPostArtifact(store, post.campaignId, saved.artifact.id)).toThrow(/invalid social post artifact/i);
+  });
+
+  it("accepts visual prompts with empty requiredTerms or excludedTerms", () => {
+    const root = setupApprovedCampaign(roots);
+    const store = createCampaignStore(root);
+    const postWithEmptyTerms: MarketingPostInput = {
+      ...post,
+      visualPrompts: [{
+        ...post.visualPrompts[0],
+        requiredTerms: [],
+        excludedTerms: [],
+      }],
+    };
+    const saved = saveMarketingPostArtifact(store, root, postWithEmptyTerms);
+    expect(saved.post.visualPrompts[0].requiredTerms).toEqual([]);
+    expect(readMarketingPostArtifact(store, post.campaignId).post.visualPrompts[0].requiredTerms).toEqual([]);
+  });
+
+  it("accepts post with empty callToAction", () => {
+    const root = setupApprovedCampaign(roots);
+    const store = createCampaignStore(root);
+    const postWithEmptyCta: MarketingPostInput = {
+      ...post,
+      callToAction: "",
+    };
+    const saved = saveMarketingPostArtifact(store, root, postWithEmptyCta);
+    expect(saved.post.callToAction).toBe("");
   });
 });

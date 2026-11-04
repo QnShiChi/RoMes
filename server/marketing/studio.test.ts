@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
 import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
 import {
+  cleanSearchQuery,
   detectImageFormat,
   distributeScriptToScenes,
   enrichScriptForDuration,
@@ -47,6 +48,12 @@ describe("marketing studio core", () => {
     expect(detectImageFormat(VALID_JPEG)).toBe("jpeg");
     expect(detectImageFormat(VALID_PNG)).toBe("png");
     expect(detectImageFormat(Buffer.from("<html>error</html>"))).toBeNull();
+  });
+
+  it("cleanSearchQuery strips metadata noise like requiredTerms and aspectRatio", () => {
+    const raw = "Claude Duet, AI assistant, Working scene with AI, Use Claude Duet in daily work; requiredTerms: Claude Duet, AI, Anthropic; excludedTerms: watermark, cartoon; aspectRatio: 1:1";
+    expect(cleanSearchQuery(raw)).toBe("Claude Duet, AI assistant, Working scene with AI, Use Claude Duet in daily work");
+    expect(cleanSearchQuery("", "claude-duet")).toBe("claude duet");
   });
 
   it("extracts clean search keywords from verbose visual prompts", () => {
@@ -279,7 +286,7 @@ Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang tr�
 
   it("generates exactly N images corresponding to N input prompts without unsplash", async () => {
     const root = makeTempDir();
-    server = createServer((req, res) => {
+    server = createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "image/jpeg" });
       res.end(VALID_JPEG);
     });
@@ -308,7 +315,7 @@ Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang tr�
   it("falls back to FLUX when Gemini image API returns 429 quota exceeded", async () => {
     const root = makeTempDir();
     let fluxHit = false;
-    server = createServer((req, res) => {
+    server = createServer((_req, res) => {
       fluxHit = true;
       res.writeHead(200, { "Content-Type": "image/jpeg" });
       res.end(VALID_JPEG);

@@ -94,13 +94,14 @@ export async function mixCampaignAudio(
   const padFilter = padSec > 0 ? `,apad=whole_dur=${padSec}` : "";
 
   if (!hasBgm) {
-    const args = ["-y", "-i", input.voicePath];
+    const args = ["-loglevel", "error", "-y", "-i", input.voicePath];
     if (padSec > 0) {
       args.push("-af", `apad=whole_dur=${padSec}`);
     }
     args.push("-c:a", "libmp3lame", input.outputPath);
     execFileSync("ffmpeg", args, {
       timeout: 30_000,
+      maxBuffer: 50 * 1024 * 1024,
       stdio: "pipe",
     });
   } else if (enableDucking) {
@@ -113,6 +114,8 @@ export async function mixCampaignAudio(
     execFileSync(
       "ffmpeg",
       [
+        "-loglevel",
+        "error",
         "-y",
         "-i",
         input.voicePath,
@@ -130,7 +133,7 @@ export async function mixCampaignAudio(
         "3",
         input.outputPath,
       ],
-      { timeout: 60_000, stdio: "pipe" },
+      { timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" },
     );
   } else {
     const filterComplex =
@@ -141,6 +144,8 @@ export async function mixCampaignAudio(
     execFileSync(
       "ffmpeg",
       [
+        "-loglevel",
+        "error",
         "-y",
         "-i",
         input.voicePath,
@@ -156,7 +161,7 @@ export async function mixCampaignAudio(
         "libmp3lame",
         input.outputPath,
       ],
-      { timeout: 60_000, stdio: "pipe" },
+      { timeout: 60_000, maxBuffer: 50 * 1024 * 1024, stdio: "pipe" },
     );
   }
 

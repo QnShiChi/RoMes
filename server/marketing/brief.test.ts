@@ -151,6 +151,50 @@ describe("marketing consultation", () => {
     });
   });
 
+  it("defaults callToAction when fieldSource is proposed_default and input is omitted", () => {
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Claude Duet",
+      goal: "Giới thiệu tính năng",
+      audience: "Dân công nghệ",
+      platform: "Facebook",
+      style: "Chuyên nghiệp",
+      fieldSources: {
+        ...socialSources,
+        goal: "proposed_default",
+        audience: "proposed_default",
+        platform: "proposed_default",
+        style: "proposed_default",
+        callToAction: "proposed_default",
+      },
+    });
+    expect(result).toMatchObject({
+      complete: true,
+      brief: {
+        callToAction: "Chia sẻ cảm nghĩ của bạn bên dưới bài viết",
+      },
+    });
+  });
+
+  it("normalizes negative callToAction to 'Không có CTA'", () => {
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Claude Duet",
+      goal: "Giới thiệu",
+      audience: "IT",
+      platform: "Facebook",
+      style: "Thực tế",
+      callToAction: "ko",
+      fieldSources: socialSources,
+    });
+    expect(result).toMatchObject({
+      complete: true,
+      brief: {
+        callToAction: "Không có CTA",
+      },
+    });
+  });
+
   it("refuses a complete-looking brief whose values have no provenance", () => {
     const result = assessMarketingBrief({
       contentType: "social_post",

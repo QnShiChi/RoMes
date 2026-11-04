@@ -37,6 +37,15 @@ describe("recall terms and query", () => {
     expect(recallQuery("where is the invoice folder")).not.toBeNull();
   });
 
+  it("drops Vietnamese conversational filler and greetings", () => {
+    expect(recallQuery("Hello em")).toBeNull();
+    expect(recallQuery("Chào em nhé")).toBeNull();
+    expect(recallQuery("Dạ em chào anh ạ")).toBeNull();
+    expect(recallQuery("Alo bạn ơi")).toBeNull();
+    expect(recallQuery("em làm giúp anh một video đi")).toBeNull();
+    expect(recallTerms("Hello em, làm video về chip AI nhé")).toEqual(["chip", "ai"]);
+  });
+
   it("needs two matched terms once the question has five content words", () => {
     expect(enoughMatches("dentist appointment", "the [dentist] is on Monday")).toBe(true);
     const long = "which dentist did we choose for the quarterly office health appointment";

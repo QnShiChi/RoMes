@@ -42,6 +42,9 @@ const absolutePath = (value: string): string | null => {
 
 export const localFilePath = (href?: string): string | null => {
   if (!href) return null;
+  if (/^sandbox:/i.test(href)) {
+    return localFilePath(href.slice("sandbox:".length));
+  }
   if (/^file:\/\//i.test(href)) {
     try {
       const url = new URL(href);
@@ -68,6 +71,10 @@ export function chatUrlTransform(value: string, key = "href"): string {
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
   // for the server's single decode.
   const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
+  if (/^sandbox:/i.test(url)) {
+    const stripped = url.slice("sandbox:".length);
+    return localFilePath(stripped) ? stripped : "";
+  }
   if (/^file:\/\//i.test(url) || WINDOWS_PATH.test(url) || url.startsWith("\\\\")) {
     return localFilePath(url) ? url : "";
   }
