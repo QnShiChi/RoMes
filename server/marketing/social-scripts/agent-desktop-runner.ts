@@ -37,8 +37,24 @@ export class AgentDesktopRunner {
     this.executor = executor ?? new DefaultDesktopExecutor();
   }
 
-  async snapshot(app: string = "chrome"): Promise<SnapshotNode> {
-    const res = await this.executor.run("snapshot", ["--app", app, "-i", "--compact"]);
+  async getActiveBrowserApp(): Promise<string> {
+    try {
+      const res = await this.executor.run("list-apps", []);
+      if (res.ok && res.data) {
+        const data = res.data as { apps: Array<{ name: string }> };
+        const names = data.apps.map((a) => a.name.toLowerCase());
+        if (names.some((n) => n.includes("brave"))) return "brave";
+        if (names.some((n) => n.includes("chrome"))) return "chrome";
+      }
+    } catch {
+      // fallback
+    }
+    return "chrome";
+  }
+
+  async snapshot(app?: string): Promise<SnapshotNode> {
+    const targetApp = app ?? (await this.getActiveBrowserApp());
+    const res = await this.executor.run("snapshot", ["--app", targetApp, "--max-depth", "30", "-i", "--compact"]);
     if (!res.ok || !res.data) {
       throw new Error(res.error?.message ?? "Snapshot failed");
     }
@@ -47,7 +63,7 @@ export class AgentDesktopRunner {
     return data.tree;
   }
 
-  async findTab(titlePattern: RegExp, app: string = "chrome"): Promise<string | null> {
+  async findTab(titlePattern: RegExp, app?: string): Promise<string | null> {
     const tree = await this.snapshot(app);
     return this.searchNode(tree, (node) => {
       return node.role === "tab" && Boolean(node.name && titlePattern.test(node.name));
