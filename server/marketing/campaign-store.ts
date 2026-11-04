@@ -109,8 +109,10 @@ const briefSchema = z.object({
   audience: z.string().min(1),
   platform: z.string().min(1),
   style: z.string().min(1),
-  targetDurationSeconds: z.number().positive(),
+  targetDurationSeconds: z.number().positive().optional(),
   callToAction: z.string().min(1),
+  contentType: z.enum(["social_post", "video_campaign"]).optional(),
+  imageCount: z.number().int().positive().optional(),
 }).strict();
 const metadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
 const artifactSchema = z.object({
