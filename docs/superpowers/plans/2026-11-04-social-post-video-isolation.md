@@ -16,7 +16,7 @@
 - Modify: `server/marketing/brief.test.ts`
 - Modify: `server/marketing/brief.ts`
 
-- [ ] **Step 1: Write the failing regression test**
+- [x] **Step 1: Write the failing regression test**
 
 Add this case inside `describe("marketing consultation", ...)`:
 
@@ -50,7 +50,7 @@ it("does not use video language while consulting on a social post", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -60,7 +60,7 @@ pnpm vitest run server/marketing/brief.test.ts
 
 Expected: FAIL because the actual CTA question still says `sau video`.
 
-- [ ] **Step 3: Implement the minimal content-type-specific question selection**
+- [x] **Step 3: Implement the minimal content-type-specific question selection**
 
 In `server/marketing/brief.ts`, retain the existing general questions, remove `callToAction` from that shared map, and add:
 
@@ -73,7 +73,7 @@ const CALL_TO_ACTION_QUESTIONS: Record<MarketingBrief["contentType"], string> = 
 
 When mapping missing fields, select `CALL_TO_ACTION_QUESTIONS[contentType]` for `callToAction`; otherwise use the existing general question.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -83,7 +83,7 @@ pnpm vitest run server/marketing/brief.test.ts
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Run the marketing regression suite**
+- [x] **Step 5: Run the marketing regression suite**
 
 Run:
 
@@ -93,7 +93,7 @@ pnpm vitest run server/marketing/brief.test.ts server/marketing/mcp-server.test.
 
 Expected: all tests pass, including existing video behavior and team composition.
 
-- [ ] **Step 6: Commit the fix**
+- [x] **Step 6: Commit the fix**
 
 ```bash
 git add server/marketing/brief.ts server/marketing/brief.test.ts
