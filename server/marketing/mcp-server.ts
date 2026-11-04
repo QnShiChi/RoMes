@@ -55,6 +55,15 @@ const TOOLS = [
         style: { type: "string" },
         targetDurationSeconds: { type: "number" },
         callToAction: { type: "string" },
+        contentType: {
+          type: "string",
+          enum: ["social_post", "video_campaign"],
+          description: "Use 'social_post' for Facebook, LinkedIn, Instagram written articles; use 'video_campaign' for video clips.",
+        },
+        imageCount: {
+          type: "number",
+          description: "Exact number of commercial images to generate (e.g. 1 cover, 3 or 4 carousel images).",
+        },
       },
       required: ["campaignSlug"],
     },
@@ -206,7 +215,7 @@ const TOOLS = [
             "Video length the user asked for, in seconds. The video is never shorter than this; write about 2.3 Vietnamese words per second of script to fill it with narration.",
         },
       },
-      required: ["campaignId", "campaignSlug", "script", "scenes", "targetDurationSeconds"],
+      required: ["campaignId", "campaignSlug", "script"],
     },
   },
   {
@@ -324,6 +333,16 @@ function resolveCampaignId(assetsRoot: string, rawId: string): string {
     const latest = findLatestCampaign(assetsRoot);
     if (latest) return latest;
   }
+  if (existsSync(join(assetsRoot, trimmed, "campaign.json"))) {
+    return trimmed;
+  }
+  try {
+    const dirs = readdirSync(assetsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(join(assetsRoot, d.name, "campaign.json")))
+      .map((d) => d.name);
+    const prefixMatch = dirs.find((d) => d === trimmed || d.startsWith(trimmed) || trimmed.startsWith(d));
+    if (prefixMatch) return prefixMatch;
+  } catch {}
   return trimmed;
 }
 
@@ -415,6 +434,10 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const current = CAMPAIGNS.get(campaign.id);
     const reusable = current.artifacts.filter((artifact) => artifact.type === "image" && artifact.operationKey.startsWith(`${batchKey}:`) && existsSync(artifact.path));
     if (reusable.length === prompts.length) {
+      const curStatus = CAMPAIGNS.get(campaign.id).status;
+      if (curStatus === "scripting" || curStatus === "approved") {
+        CAMPAIGNS.transition(campaign.id, "assets_ready");
+      }
       return {
         content: [{
           type: "text",
@@ -463,7 +486,10 @@ async function handleCall(name: string, args: Record<string, unknown>) {
       },
     }));
     CAMPAIGNS.finishOperation(campaign.id, batchKey, artifacts[0]!.id);
-    if (CAMPAIGNS.get(campaign.id).status === "scripting") CAMPAIGNS.transition(campaign.id, "assets_ready");
+    const postStatus = CAMPAIGNS.get(campaign.id).status;
+    if (postStatus === "scripting" || postStatus === "approved") {
+      CAMPAIGNS.transition(campaign.id, "assets_ready");
+    }
     return {
       content: [
         {
