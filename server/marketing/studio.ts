@@ -73,7 +73,7 @@ export interface SaveDraftInput {
   posts: MarketingPostDraft[];
 }
 
-const DEFAULT_BASE_URL = "https://image.pollinations.ai/prompt";
+const DEFAULT_BASE_URL = "http://127.0.0.1:7860/prompt";
 const DEFAULT_TIMEOUT_MS = 25_000;
 const DEFAULT_RETRIES = 1;
 
@@ -112,12 +112,6 @@ for y in range(h):
     b = int(pal[0][2] + (pal[1][2] - pal[0][2]) * (y / h))
     draw.line([(0, y), (w, y)], fill=(r, g, b))
 
-overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-draw_ol = ImageDraw.Draw(overlay)
-draw_ol.ellipse([w*0.15, h*0.2, w*0.85, h*0.55], fill=(*pal[2], 55))
-draw_ol.ellipse([w*0.05, h*0.45, w*0.95, h*0.85], fill=(*pal[3], 45))
-
-img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 img.save(out, "JPEG", quality=95)
 `;
     execFileSync("python3", ["-c", script, String(width), String(height), String(index), outputPath], {
@@ -503,7 +497,6 @@ async function fetchSingleImage(
           const response = await fetch(url, {
             headers: {
               accept: "image/jpeg,image/png,image/webp,*/*",
-              referer: "https://pollinations.ai",
             },
             signal: AbortSignal.timeout(options.timeoutMs),
           });
