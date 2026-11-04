@@ -3,8 +3,11 @@ import type { SocialPoster, SocialPostPayload, SocialPostResult } from "./types.
 
 export class LinkedInPoster implements SocialPoster {
   readonly platform = "linkedin";
+  private readonly runner: AgentDesktopRunner;
 
-  constructor(private readonly runner: AgentDesktopRunner = new AgentDesktopRunner()) {}
+  constructor(runner?: AgentDesktopRunner) {
+    this.runner = runner ?? new AgentDesktopRunner();
+  }
 
   async isAvailable(): Promise<boolean> {
     const tab = await this.runner.findTab(/linkedin\.com/i);

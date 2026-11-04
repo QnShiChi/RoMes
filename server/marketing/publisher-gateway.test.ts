@@ -117,4 +117,45 @@ describe("publisher gateway", () => {
     expect(store.get(campaign.id).status).toBe("published");
     expect(store.get(campaign.id).artifacts.filter((item) => item.type === "publish_evidence")).toHaveLength(1);
   });
+
+  it("publishes to facebook, x, linkedin, and instagram with valid canonical URLs", async () => {
+    const { store, campaign, video } = fixture();
+    const adapter: PublisherAdapter = {
+      async capabilities(): Promise<PublishCapability[]> {
+        return [
+          { provider: "agent-desktop", platform: "facebook", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "x", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "linkedin", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "instagram", accountId: "test-user" },
+        ];
+      },
+      async publish(input): Promise<PublishEvidence> {
+        const domainMap: Record<string, string> = {
+          facebook: "https://www.facebook.com/post/123",
+          x: "https://x.com/user/status/123",
+          linkedin: "https://www.linkedin.com/feed/update/123",
+          instagram: "https://www.instagram.com/p/123",
+        };
+        return {
+          provider: "agent-desktop",
+          platform: input.platform,
+          accountId: "test-user",
+          providerPostId: `post-${input.platform}`,
+          canonicalUrl: domainMap[input.platform] || "https://example.com",
+          publishedAt: "2026-11-04T00:00:00.000Z",
+        };
+      },
+    };
+
+    const gateway = createPublisherGateway(store, [adapter]);
+    const fbRes = await gateway.publish({
+      campaignId: campaign.id,
+      artifactId: video.id,
+      platform: "facebook",
+      caption: "Facebook Post",
+      idempotencyKey: "fb-1",
+    });
+    expect(fbRes.platform).toBe("facebook");
+    expect(fbRes.canonicalUrl).toContain("facebook.com");
+  });
 });

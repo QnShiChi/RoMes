@@ -8,6 +8,7 @@ import { CampaignStoreError, createCampaignStore } from "./campaign-store.ts";
 import { renderApprovedCampaign } from "./campaign-workflow.ts";
 import { routeMarketingIntent } from "./intent.ts";
 import { createPublisherGateway, type PublishPlatform } from "./publisher-gateway.ts";
+import { AgentDesktopPublisherAdapter } from "./social-scripts/publisher-adapter.ts";
 import {
   generateMarketingImages,
   generateMarketingVideoWorkflow,
@@ -29,7 +30,11 @@ const BASE_URL =
   undefined;
 
 const CAMPAIGNS = createCampaignStore(ASSETS_ROOT);
-const PUBLISHER = createPublisherGateway(CAMPAIGNS, []);
+const DESKTOP_ADAPTERS =
+  process.env.OMB_ENABLE_DESKTOP_PUBLISHER === "1" || process.env.NODE_ENV !== "test"
+    ? [new AgentDesktopPublisherAdapter()]
+    : [];
+const PUBLISHER = createPublisherGateway(CAMPAIGNS, DESKTOP_ADAPTERS);
 
 const TOOLS = [
   {
@@ -237,13 +242,13 @@ const TOOLS = [
   },
   {
     name: "publish_marketing_artifact",
-    description: "Publish one ready video through a configured provider. Success requires provider evidence.",
+    description: "Publish one ready video or social post through a configured provider. Success requires provider evidence.",
     inputSchema: {
       type: "object",
       properties: {
         campaignId: { type: "string" },
         artifactId: { type: "string" },
-        platform: { type: "string", enum: ["tiktok", "facebook"] },
+        platform: { type: "string", enum: ["tiktok", "facebook", "x", "linkedin", "instagram"] },
         caption: { type: "string" },
         idempotencyKey: { type: "string" },
       },
@@ -563,8 +568,8 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
     const campaign = CAMPAIGNS.get(campaignId);
     const artifactId = String(args.artifactId ?? "");
-    const artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId && candidate.type === "video");
-    if (!artifact || !existsSync(artifact.path)) throw new Error(`Ready video artifact not found: ${artifactId}`);
+    const artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId);
+    if (!artifact || !existsSync(artifact.path)) throw new Error(`Ready artifact not found: ${artifactId}`);
     const platform = String(args.platform ?? "") as PublishPlatform;
     const capabilities = await PUBLISHER.capabilities();
     if (!capabilities.some((capability) => capability.platform === platform)) {

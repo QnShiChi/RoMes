@@ -30,9 +30,12 @@ export class DefaultDesktopExecutor implements DesktopCliExecutor {
 }
 
 export class AgentDesktopRunner {
+  private readonly executor: DesktopCliExecutor;
   private lastSnapshotTree: SnapshotNode | null = null;
 
-  constructor(private readonly executor: DesktopCliExecutor = new DefaultDesktopExecutor()) {}
+  constructor(executor?: DesktopCliExecutor) {
+    this.executor = executor ?? new DefaultDesktopExecutor();
+  }
 
   async snapshot(app: string = "chrome"): Promise<SnapshotNode> {
     const res = await this.executor.run("snapshot", ["--app", app, "--skeleton", "-i", "--compact"]);

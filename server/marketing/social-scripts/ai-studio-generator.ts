@@ -1,7 +1,11 @@
 import { AgentDesktopRunner } from "./agent-desktop-runner.ts";
 
 export class AiStudioGenerator {
-  constructor(private readonly runner: AgentDesktopRunner = new AgentDesktopRunner()) {}
+  private readonly runner: AgentDesktopRunner;
+
+  constructor(runner?: AgentDesktopRunner) {
+    this.runner = runner ?? new AgentDesktopRunner();
+  }
 
   async isAvailable(): Promise<boolean> {
     const tab = await this.runner.findTab(/aistudio\.google\.com/i);
