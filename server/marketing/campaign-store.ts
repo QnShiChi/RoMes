@@ -15,7 +15,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { z } from "zod";
 
-import type { MarketingBrief } from "./brief.ts";
+import type { FieldSource, MarketingBrief, MarketingBriefSources } from "./brief.ts";
 
 export type CampaignStatus =
   | "needs_brief"
@@ -50,12 +50,13 @@ export interface CampaignOperation {
 }
 
 export interface MarketingCampaign {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   slug: string;
   revision: number;
   status: CampaignStatus;
   brief: MarketingBrief;
+  briefSources: MarketingBriefSources;
   createdAt: string;
   updatedAt: string;
   lastValidStatus?: CampaignStatus;
@@ -72,7 +73,7 @@ export interface RegisterArtifactInput {
 }
 
 export interface CampaignStore {
-  prepare(slug: string, brief: MarketingBrief): MarketingCampaign;
+  prepare(slug: string, brief: MarketingBrief, sources: MarketingBriefSources): MarketingCampaign;
   get(idOrSlug: string): MarketingCampaign;
   approve(idOrSlug: string, revision: number): MarketingCampaign;
   transition(idOrSlug: string, status: CampaignStatus): MarketingCampaign;
@@ -103,14 +104,27 @@ const statusSchema = z.enum([
   "published",
   "failed",
 ]);
+const briefV1Schema = z.object({
+  topic: z.string().min(1),
+  goal: z.string().min(1),
+  audience: z.string().min(1),
+  platform: z.string().min(1),
+  style: z.string().min(1),
+  targetDurationSeconds: z.number().positive().optional(),
+  callToAction: z.string().min(1),
+  contentType: z.enum(["social_post", "video_campaign"]).optional(),
+  imageCount: z.number().int().positive().optional(),
+}).strict();
 const briefSchema = z.object({
   topic: z.string().min(1),
   goal: z.string().min(1),
   audience: z.string().min(1),
   platform: z.string().min(1),
   style: z.string().min(1),
-  targetDurationSeconds: z.number().positive(),
+  targetDurationSeconds: z.number().positive().optional(),
   callToAction: z.string().min(1),
+  contentType: z.enum(["social_post", "video_campaign"]),
+  imageCount: z.number().int().positive(),
 }).strict();
 const metadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
 const artifactSchema = z.object({
@@ -128,13 +142,30 @@ const operationSchema = z.object({
   state: z.enum(["running", "succeeded", "failed"]),
   artifactId: z.string().min(1).optional(),
 }).strict();
-const campaignSchema = z.object({
+const campaignV1Schema = z.object({
   schemaVersion: z.literal(1),
   id: z.string().min(1),
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   revision: z.number().int().positive(),
   status: statusSchema,
+  brief: briefV1Schema,
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+  lastValidStatus: statusSchema.optional(),
+  failedStage: statusSchema.optional(),
+  artifacts: z.array(artifactSchema),
+  operations: z.record(z.string(), operationSchema),
+}).strict();
+const sourceSchema = z.enum(["user", "proposed_default", "confirmed"]);
+const briefSourcesSchema = z.record(z.string(), sourceSchema);
+const campaignSchema = z.object({
+  schemaVersion: z.literal(2),
+  id: z.string().min(1),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  revision: z.number().int().positive(),
+  status: statusSchema,
   brief: briefSchema,
+  briefSources: briefSourcesSchema,
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   lastValidStatus: statusSchema.optional(),
@@ -143,11 +174,33 @@ const campaignSchema = z.object({
   operations: z.record(z.string(), operationSchema),
 }).strict();
 
+function migrateV1(input: z.infer<typeof campaignV1Schema>): MarketingCampaign {
+  const contentType = input.brief.contentType ?? (
+    /facebook|linkedin|instagram|ig|fb/i.test(input.brief.platform) ? "social_post" : "video_campaign"
+  );
+  const brief: MarketingBrief = {
+    ...input.brief,
+    contentType,
+    imageCount: input.brief.imageCount ?? 1,
+  };
+  const keys = Object.keys(brief) as Array<keyof MarketingBrief>;
+  const briefSources = Object.fromEntries(keys.map((field) => [
+    field,
+    field === "topic" ? "user" : "proposed_default",
+  ])) as MarketingBriefSources;
+  return campaignSchema.parse({
+    ...input,
+    schemaVersion: 2,
+    brief,
+    briefSources,
+  }) as MarketingCampaign;
+}
+
 const NEXT: Record<CampaignStatus, CampaignStatus[]> = {
   needs_brief: ["approved", "failed"],
   approved: ["scripting", "assets_ready", "failed"],
   scripting: ["assets_ready", "failed"],
-  assets_ready: ["rendering", "failed"],
+  assets_ready: ["rendering", "ready", "failed"],
   rendering: ["ready", "failed"],
   ready: ["publishing", "failed"],
   publishing: ["published", "failed"],
@@ -159,6 +212,7 @@ const LAST_VALID: Partial<Record<CampaignStatus, CampaignStatus>> = {
   scripting: "approved",
   assets_ready: "approved",
   rendering: "assets_ready",
+  ready: "assets_ready",
   publishing: "ready",
 };
 
@@ -197,7 +251,11 @@ export function createCampaignStore(
     const { path } = location(idOrSlug);
     if (!existsSync(path)) throw new CampaignStoreError(`Marketing campaign not found: ${idOrSlug}`);
     try {
-      return campaignSchema.parse(JSON.parse(readFileSync(path, "utf8"))) as MarketingCampaign;
+      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (typeof raw === "object" && raw !== null && "schemaVersion" in raw && raw.schemaVersion === 1) {
+        return migrateV1(campaignV1Schema.parse(raw));
+      }
+      return campaignSchema.parse(raw) as MarketingCampaign;
     } catch (error) {
       if (error instanceof CampaignStoreError) throw error;
       throw new CampaignStoreError(`Marketing campaign manifest is invalid: ${error instanceof Error ? error.message : String(error)}`);
@@ -217,17 +275,18 @@ export function createCampaignStore(
   };
 
   const store: CampaignStore = {
-    prepare(rawSlug, brief) {
+    prepare(rawSlug, brief, briefSources) {
       const { slug, path } = location(rawSlug);
       const existing = existsSync(path) ? read(slug) : null;
       const timestamp = now();
       return write({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: slug,
         slug,
         revision: (existing?.revision ?? 0) + 1,
         status: "needs_brief",
         brief,
+        briefSources,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
         artifacts: [],
@@ -240,9 +299,21 @@ export function createCampaignStore(
     },
 
     approve(idOrSlug, revision) {
-      const campaign = read(idOrSlug);
-      if (campaign.revision !== revision) throw new CampaignStoreError(`Campaign revision changed from ${revision} to ${campaign.revision}`);
-      return store.transition(idOrSlug, "approved");
+      return update(idOrSlug, (campaign) => {
+        if (campaign.revision !== revision) {
+          throw new CampaignStoreError(`Campaign revision changed from ${revision} to ${campaign.revision}`);
+        }
+        if (campaign.status !== "needs_brief") {
+          throw new CampaignStoreError(`Cannot transition campaign from ${campaign.status} to approved`);
+        }
+        const briefSources = Object.fromEntries(
+          Object.entries(campaign.briefSources).map(([field, source]) => [
+            field,
+            source === "proposed_default" ? "confirmed" : source,
+          ]),
+        ) as Record<string, FieldSource>;
+        return { ...campaign, status: "approved", briefSources, updatedAt: now() };
+      });
     },
 
     transition(idOrSlug, status) {

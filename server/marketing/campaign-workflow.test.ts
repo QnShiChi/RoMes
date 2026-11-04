@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { MarketingBrief } from "./brief.ts";
+import type { MarketingBrief, MarketingBriefSources } from "./brief.ts";
 import { createCampaignStore } from "./campaign-store.ts";
 import { renderApprovedCampaign } from "./campaign-workflow.ts";
 import type { GenerateMarketingVideoInput, GenerateMarketingVideoOutput } from "./studio.ts";
@@ -17,7 +17,13 @@ const brief: MarketingBrief = {
   style: "modern tech",
   targetDurationSeconds: 60,
   callToAction: "Đăng ký demo",
+  contentType: "video_campaign",
+  imageCount: 1,
 };
+
+const sources: MarketingBriefSources = Object.fromEntries(
+  Object.keys(brief).map((field) => [field, "user"]),
+);
 
 const input: GenerateMarketingVideoInput & { targetDurationSeconds: number } = {
   campaignSlug: "ai-agent",
@@ -41,7 +47,7 @@ describe("approved campaign rendering", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-marketing-render-"));
     roots.push(root);
     const store = createCampaignStore(root);
-    const campaign = store.prepare("ai-agent", brief);
+    const campaign = store.prepare("ai-agent", brief, sources);
     if (status !== "needs_brief") store.approve(campaign.id, campaign.revision);
     if (status === "assets_ready") store.transition(campaign.id, "assets_ready");
     return { root, store, campaign };

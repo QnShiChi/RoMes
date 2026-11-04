@@ -18,6 +18,8 @@ bots:
         - mcp:marketing_studio:prepare_marketing_campaign
         - mcp:marketing_studio:approve_marketing_campaign
         - mcp:marketing_studio:get_marketing_campaign
+        - mcp:marketing_studio:save_marketing_post
+        - mcp:marketing_studio:get_marketing_post
         - mcp:marketing_studio:resolve_marketing_artifact
         - mcp:marketing_studio:get_marketing_publish_capabilities
         - mcp:marketing_studio:publish_marketing_artifact
@@ -34,6 +36,7 @@ bots:
       allow:
         - native:*
         - mcp:marketing_studio:get_marketing_campaign
+        - mcp:marketing_studio:get_marketing_post
         - mcp:marketing_studio:generate_marketing_images
   - name: Momo
     team: Marketing

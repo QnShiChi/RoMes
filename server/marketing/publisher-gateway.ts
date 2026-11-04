@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { CampaignStoreError, type CampaignStore } from "./campaign-store.ts";
 
-export type PublishPlatform = "tiktok" | "facebook";
+export type PublishPlatform = "tiktok" | "facebook" | "x" | "linkedin" | "instagram";
 
 export interface PublishCapability {
   provider: string;
@@ -24,7 +24,8 @@ export interface PublisherAdapter {
   capabilities(): Promise<PublishCapability[]>;
   publish(input: {
     platform: PublishPlatform;
-    videoPath: string;
+    videoPath?: string;
+    imagePaths?: string[];
     caption: string;
     idempotencyKey: string;
   }): Promise<PublishEvidence>;
@@ -52,7 +53,7 @@ export class PublisherGatewayError extends Error {
 
 const capabilitySchema = z.object({
   provider: z.string().trim().min(1),
-  platform: z.enum(["tiktok", "facebook"]),
+  platform: z.enum(["tiktok", "facebook", "x", "linkedin", "instagram"]),
   accountId: z.string().trim().min(1),
 }).strict();
 
@@ -64,8 +65,15 @@ const evidenceSchema = capabilitySchema.extend({
 
 function validPlatformHost(platform: PublishPlatform, hostname: string): boolean {
   const host = hostname.toLowerCase();
-  const domains = platform === "tiktok" ? ["tiktok.com"] : ["facebook.com", "fb.watch"];
-  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  const domains: Record<PublishPlatform, string[]> = {
+    tiktok: ["tiktok.com"],
+    facebook: ["facebook.com", "fb.watch"],
+    x: ["x.com", "twitter.com"],
+    linkedin: ["linkedin.com"],
+    instagram: ["instagram.com", "threads.net"],
+  };
+  const list = domains[platform] ?? [];
+  return list.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
 function validateEvidence(raw: PublishEvidence, requested: PublishCapability): PublishEvidence {
@@ -125,23 +133,25 @@ export function createPublisherGateway(
       if (campaign.status !== "ready") {
         throw new CampaignStoreError(`Campaign must be ready before publishing; current status is ${campaign.status}`);
       }
-      const video = campaign.artifacts.find((artifact) => artifact.id === input.artifactId && artifact.type === "video");
-      if (!video || !existsSync(video.path)) throw new CampaignStoreError(`Ready video artifact not found: ${input.artifactId}`);
+      const targetArtifact = campaign.artifacts.find((artifact) => artifact.id === input.artifactId);
+      if (!targetArtifact || !existsSync(targetArtifact.path)) throw new CampaignStoreError(`Ready artifact not found: ${input.artifactId}`);
       const selected = (await available()).find((row) => row.capability.platform === input.platform);
       if (!selected) throw new PublisherGatewayError(`No configured publisher for ${input.platform}`);
 
       store.beginOperation(campaign.id, operationKey, "publish");
       store.transition(campaign.id, "publishing");
       try {
+        const imagePaths = campaign.artifacts.filter((a) => a.type === "image").map((a) => a.path);
         const raw = await selected.adapter.publish({
           platform: input.platform,
-          videoPath: video.path,
+          videoPath: targetArtifact.type === "video" ? targetArtifact.path : undefined,
+          imagePaths,
           caption: input.caption,
           idempotencyKey: input.idempotencyKey,
         });
         const evidence = validateEvidence(raw, selected.capability);
         const suffix = createHash("sha256").update(operationKey).digest("hex").slice(0, 16);
-        const evidencePath = join(dirname(video.path), `publish-evidence-${suffix}.json`);
+        const evidencePath = join(dirname(targetArtifact.path), `publish-evidence-${suffix}.json`);
         writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
         const artifact = store.registerArtifact(campaign.id, {
           type: "publish_evidence",

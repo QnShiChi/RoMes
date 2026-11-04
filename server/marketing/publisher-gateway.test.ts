@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { MarketingBrief } from "./brief.ts";
+import type { MarketingBrief, MarketingBriefSources } from "./brief.ts";
 import { createCampaignStore } from "./campaign-store.ts";
 import {
   createPublisherGateway,
@@ -21,7 +21,13 @@ const brief: MarketingBrief = {
   style: "modern tech",
   targetDurationSeconds: 60,
   callToAction: "Đăng ký demo",
+  contentType: "video_campaign",
+  imageCount: 1,
 };
+
+const sources: MarketingBriefSources = Object.fromEntries(
+  Object.keys(brief).map((field) => [field, "user"]),
+);
 
 describe("publisher gateway", () => {
   const roots: string[] = [];
@@ -34,7 +40,7 @@ describe("publisher gateway", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-marketing-publish-"));
     roots.push(root);
     const store = createCampaignStore(root);
-    const campaign = store.prepare("ai-agent", brief);
+    const campaign = store.prepare("ai-agent", brief, sources);
     store.approve(campaign.id, campaign.revision);
     store.transition(campaign.id, "assets_ready");
     store.beginOperation(campaign.id, "render-1", "render");
@@ -116,5 +122,94 @@ describe("publisher gateway", () => {
     expect(publishes).toBe(1);
     expect(store.get(campaign.id).status).toBe("published");
     expect(store.get(campaign.id).artifacts.filter((item) => item.type === "publish_evidence")).toHaveLength(1);
+  });
+
+  it("publishes to facebook, x, linkedin, and instagram with valid canonical URLs", async () => {
+    const { store, campaign, video } = fixture();
+    const adapter: PublisherAdapter = {
+      async capabilities(): Promise<PublishCapability[]> {
+        return [
+          { provider: "agent-desktop", platform: "facebook", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "x", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "linkedin", accountId: "test-user" },
+          { provider: "agent-desktop", platform: "instagram", accountId: "test-user" },
+        ];
+      },
+      async publish(input): Promise<PublishEvidence> {
+        const domainMap: Record<string, string> = {
+          facebook: "https://www.facebook.com/post/123",
+          x: "https://x.com/user/status/123",
+          linkedin: "https://www.linkedin.com/feed/update/123",
+          instagram: "https://www.instagram.com/p/123",
+        };
+        return {
+          provider: "agent-desktop",
+          platform: input.platform,
+          accountId: "test-user",
+          providerPostId: `post-${input.platform}`,
+          canonicalUrl: domainMap[input.platform] || "https://example.com",
+          publishedAt: "2026-11-04T00:00:00.000Z",
+        };
+      },
+    };
+
+    const gateway = createPublisherGateway(store, [adapter]);
+    const fbRes = await gateway.publish({
+      campaignId: campaign.id,
+      artifactId: video.id,
+      platform: "facebook",
+      caption: "Facebook Post",
+      idempotencyKey: "fb-1",
+    });
+    expect(fbRes.platform).toBe("facebook");
+    expect(fbRes.canonicalUrl).toContain("facebook.com");
+  });
+
+  it("publishes a social post without explicit artifactId and auto-resolves image artifacts and ready status", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-marketing-publish-sp-"));
+    roots.push(root);
+    const store = createCampaignStore(root);
+    const campaign = store.prepare("social-post", { ...brief, contentType: "social_post" }, sources);
+    store.approve(campaign.id, campaign.revision);
+    store.transition(campaign.id, "assets_ready");
+    const imgPath = join(root, "social-post", "img-1.jpg");
+    writeFileSync(imgPath, "image-content");
+    store.registerArtifact(campaign.id, {
+      type: "image",
+      path: imgPath,
+      operationKey: "img-1",
+      metadata: { width: 800, height: 800 },
+    });
+
+    let publishedInput: any = null;
+    const adapter: PublisherAdapter = {
+      async capabilities(): Promise<PublishCapability[]> {
+        return [{ provider: "agent-desktop", platform: "facebook", accountId: "test-user" }];
+      },
+      async publish(input): Promise<PublishEvidence> {
+        publishedInput = input;
+        return {
+          provider: "agent-desktop",
+          platform: input.platform,
+          accountId: "test-user",
+          providerPostId: "fb-post-999",
+          canonicalUrl: "https://www.facebook.com/post/999",
+          publishedAt: "2026-11-04T00:00:00.000Z",
+        };
+      },
+    };
+
+    const gateway = createPublisherGateway(store, [adapter]);
+    const res = await gateway.publish({
+      campaignId: campaign.id,
+      platform: "facebook",
+      caption: "Social Post Caption",
+      idempotencyKey: "sp-publish-1",
+    });
+
+    expect(res.platform).toBe("facebook");
+    expect(publishedInput.imagePaths).toContain(imgPath);
+    expect(publishedInput.videoPath).toBeUndefined();
+    expect(store.get(campaign.id).status).toBe("published");
   });
 });

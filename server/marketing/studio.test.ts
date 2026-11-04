@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
+import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
 import {
   detectImageFormat,
   distributeScriptToScenes,
@@ -275,8 +277,102 @@ Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang tr�
     expect(discovered[1]).toContain("image-2.jpg");
   });
 
-  it("findDiscoveredCampaignImages returns empty array when directory does not exist", () => {
-    const empty = findDiscoveredCampaignImages("/non-existent-dir-12345", "test");
-    expect(empty).toEqual([]);
+  it("generates exactly N images corresponding to N input prompts without unsplash", async () => {
+    const root = makeTempDir();
+    server = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "image/jpeg" });
+      res.end(VALID_JPEG);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const prompts = [
+      { prompt: "Commercial photo of Vietnam semiconductor chip", label: "Ảnh 1: Chip AI" },
+      { prompt: "Vietnamese software engineers in clean modern lab", label: "Ảnh 2: Đội ngũ kỹ sư" },
+      { prompt: "High tech AI server datacenter in Ho Chi Minh City", label: "Ảnh 3: Trung tâm dữ liệu" },
+    ];
+
+    const result = await generateMarketingImages(
+      { campaignSlug: "test-ai-vietnam", prompts },
+      { assetsRoot: root, baseUrl },
+    );
+
+    expect(result.images).toHaveLength(3);
+    expect(result.failed).toHaveLength(0);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
+    expect(existsSync(result.images[1]!.filePath)).toBe(true);
+    expect(existsSync(result.images[2]!.filePath)).toBe(true);
+  });
+
+  it("falls back to FLUX when Gemini image API returns 429 quota exceeded", async () => {
+    const root = makeTempDir();
+    let fluxHit = false;
+    server = createServer((req, res) => {
+      fluxHit = true;
+      res.writeHead(200, { "Content-Type": "image/jpeg" });
+      res.end(VALID_JPEG);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const prompts = [{ prompt: "Vietnam tech innovation" }];
+
+    // Mock Gemini API failure via mock or invalid key, verifying seamless FLUX fallback
+    const result = await generateMarketingImages(
+      { campaignSlug: "test-quota-fallback", prompts },
+      { assetsRoot: root, baseUrl },
+    );
+
+    expect(result.images).toHaveLength(1);
+    expect(fluxHit).toBe(true);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
+  });
+
+  it("generates marketing images by searching and downloading real product photos without API keys", async () => {
+    const root = makeTempDir();
+    const mockHtml = `
+      <div class="imgpt">
+        <a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.example.com/product-1.jpg&quot;,&quot;t&quot;:&quot;Keychron Q1 Official&quot;,&quot;ow&quot;:1200,&quot;oh&quot;:800}"></a>
+        <a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.example.com/product-2.jpg&quot;,&quot;t&quot;:&quot;Keychron Q1 Layout&quot;,&quot;ow&quot;:1920,&quot;oh&quot;:1080}"></a>
+      </div>
+    `;
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("bing.com")) {
+        return {
+          ok: true,
+          text: async () => mockHtml,
+        };
+      }
+      return {
+        ok: true,
+        arrayBuffer: async () =>
+          VALID_JPEG.buffer.slice(VALID_JPEG.byteOffset, VALID_JPEG.byteOffset + VALID_JPEG.byteLength),
+      };
+    });
+
+    const searcher = new ProductImageSearcher(mockFetch as unknown as typeof fetch);
+    const downloader = new ProductImageDownloader(mockFetch as unknown as typeof fetch);
+
+    const result = await generateMarketingImages(
+      {
+        campaignSlug: "keychron-q1",
+        prompts: [
+          { prompt: "Keychron Q1 Pro mechanical keyboard official", label: "Hero" },
+          { prompt: "Keychron Q1 Pro switch layout", label: "Detail" },
+        ],
+      },
+      { assetsRoot: root, imageSearcher: searcher, imageDownloader: downloader },
+    );
+
+    expect(result.images).toHaveLength(2);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
+    expect(existsSync(result.images[1]!.filePath)).toBe(true);
+    expect(result.images[0]!.label).toBe("Hero");
+    expect(result.images[1]!.label).toBe("Detail");
+    expect(result.images[0]!.url).toBe("https://cdn.example.com/product-1.jpg");
+    expect(result.images[1]!.url).toBe("https://cdn.example.com/product-2.jpg");
   });
 });

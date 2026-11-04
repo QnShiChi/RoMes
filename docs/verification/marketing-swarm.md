@@ -20,6 +20,7 @@ artifact. It also proves that an unavailable publisher leaves the campaign in
 pnpm exec vitest run \
   server/marketing/brief.test.ts \
   server/marketing/campaign-store.test.ts \
+  server/marketing/social-post-artifact.test.ts \
   server/marketing/campaign-workflow.test.ts \
   server/marketing/publisher-gateway.test.ts \
   server/marketing/mcp-server.test.ts \
@@ -67,7 +68,8 @@ curl -sS -X POST "$MARKETING_FIXTURE_URL/api/mcp/servers/marketing_studio/test" 
 ```
 
 Expected: the create request returns HTTP 201, the patch reports `enabled:
-true`, and the test lists the eleven marketing tools. New custom servers start
+true`, and the test lists both `save_marketing_post` and `get_marketing_post`
+among the marketing tools. New custom servers start
 disabled even when the create body asks to enable them. `MARKETING_ASSETS_ROOT`
 is used because custom MCP configuration rejects reserved `OMB_*` environment
 names.
@@ -87,20 +89,26 @@ publishing tools but no render tool; Momo has the render tool but no publishing
 tool; Poppy has no marketing MCP tools. Engines that require their native tool
 surface retain `native:*`.
 
-If the fake engine is scripted for tool calls, exercise these conversation
-cases. Otherwise, the automated MCP test above is the deterministic proof of
-the lifecycle; do not present an unscripted fake reply as model-behaviour
-evidence.
+If the fake engine is scripted for tool calls, exercise this conversation.
+An unscripted model response is observational only; deterministic lifecycle
+evidence comes from the MCP and artifact tests.
 
-1. Send RoMes `tạo cho anh một video`. The settled reply asks for the missing
-   topic, goal, audience, platform, style, duration and CTA. The engine dump
-   contains no marketing production tool call.
-2. Complete and approve the brief, then run the deterministic production calls.
-   Read the resulting `campaign.json`; its state is `ready` and it contains one
-   video artifact.
-3. Send RoMes `up video vừa rồi lên TikTok`. The turn resolves the ready video,
-   checks publishing capability, and reports `no_configured_publisher`. It does
-   not call `generate_marketing_video`, and `campaign.json` remains `ready`.
+1. Send RoMes: `viết giúp anh bài về cuộc đua AI của các hãng công nghệ`.
+   Expected: one compact `ask_user` card covering the proposed platform,
+   audience, goal, CTA and image count. The transcript contains no
+   `coordinate_bots` call.
+2. Accept the proposed values but choose five images.
+   Expected: a brief summary card for revision 1. `campaign.json` remains
+   `needs_brief`.
+3. Choose `Bắt đầu`.
+   Expected: approval for revision 1, one Poppy assignment, then one `script`
+   artifact created by `save_marketing_post`.
+4. Read the coordinator transcript before Finch starts.
+   Expected: Finch's assignment contains the exact `POST_ARTIFACT_ID`; there
+   was no earlier Finch assignment.
+5. Send a revised request changing only the image count.
+   Expected: revision 2 requires confirmation and the old artifact is not
+   presented as revision 2.
 
 Read bounded evidence through the shared control surface:
 

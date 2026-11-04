@@ -6,9 +6,13 @@ import { join } from "node:path";
 import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
 import { legacyScenesToBeatManifest, type CampaignBeatManifest, type NarrativeBeat } from "./beat-schema.ts";
 import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
-import { generateMarketingSpeech } from "./speech-engine.ts";
+import { generateMarketingSpeech, resolveGeminiApiKey } from "./speech-engine.ts";
 import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
+import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
+import { filterCandidates } from "./product-images/image-quality-filter.ts";
+import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
+import type { ProductImageCandidate } from "./product-images/types.ts";
 
 export interface ImagePromptSpec {
   prompt: string;
@@ -46,6 +50,8 @@ export interface GenerateImagesOptions {
   baseUrl?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  imageSearcher?: ProductImageSearcher;
+  imageDownloader?: ProductImageDownloader;
 }
 
 export interface MarketingPostDraft {
@@ -73,7 +79,7 @@ export interface SaveDraftInput {
   posts: MarketingPostDraft[];
 }
 
-const DEFAULT_BASE_URL = "https://image.pollinations.ai/prompt";
+const DEFAULT_BASE_URL = "http://127.0.0.1:7860/prompt";
 const DEFAULT_TIMEOUT_MS = 25_000;
 const DEFAULT_RETRIES = 1;
 
@@ -112,12 +118,6 @@ for y in range(h):
     b = int(pal[0][2] + (pal[1][2] - pal[0][2]) * (y / h))
     draw.line([(0, y), (w, y)], fill=(r, g, b))
 
-overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-draw_ol = ImageDraw.Draw(overlay)
-draw_ol.ellipse([w*0.15, h*0.2, w*0.85, h*0.55], fill=(*pal[2], 55))
-draw_ol.ellipse([w*0.05, h*0.45, w*0.95, h*0.85], fill=(*pal[3], 45))
-
-img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 img.save(out, "JPEG", quality=95)
 `;
     execFileSync("python3", ["-c", script, String(width), String(height), String(index), outputPath], {
@@ -390,6 +390,64 @@ export async function fetchFromUnsplash(
   return { buffer, url: downloadUrl };
 }
 
+export const GEMINI_IMAGE_MODELS = [
+  "gemini-3.1-flash-lite-image",
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
+] as const;
+
+export async function fetchFromGeminiImageApi(
+  prompt: string,
+  apiKey: string,
+  timeoutMs = 25_000,
+): Promise<{ buffer: Buffer; url: string; model: string } | null> {
+  for (const model of GEMINI_IMAGE_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ["IMAGE"],
+          },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              inlineData?: {
+                mimeType?: string;
+                data?: string;
+              };
+            }>;
+          };
+        }>;
+      };
+
+      const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (b64) {
+        return {
+          buffer: Buffer.from(b64, "base64"),
+          url: `data:image/jpeg;base64,${b64.slice(0, 32)}...`,
+          model,
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function fetchSingleImage(
   spec: ImagePromptSpec,
   index: number,
@@ -406,29 +464,23 @@ async function fetchSingleImage(
       let buffer: Buffer | null = null;
       let url = "";
 
+      // Tier 1: Try Google AI Studio Image API (if not mock local testing server)
       if (!options.baseUrl.includes("127.0.0.1") && !options.baseUrl.includes("localhost")) {
-        const unsplashKey = resolveUnsplashKey();
-        if (unsplashKey) {
+        const geminiApiKey = resolveGeminiApiKey();
+        if (geminiApiKey) {
           try {
-            const query = extractKeywordsForSearch(spec.prompt);
-            const unsplashOut = await fetchFromUnsplash(
-              query,
-              width,
-              height,
-              unsplashKey,
-              index,
-              options.timeoutMs,
-            );
-            if (unsplashOut) {
-              buffer = unsplashOut.buffer;
-              url = unsplashOut.url;
+            const geminiOut = await fetchFromGeminiImageApi(spec.prompt.trim(), geminiApiKey, options.timeoutMs);
+            if (geminiOut) {
+              buffer = geminiOut.buffer;
+              url = geminiOut.url;
             }
           } catch {
-            // Unsplash query or download failed; proceed to next provider
+            // Fall back to Tier 2 FLUX on quota/API exhaustion
           }
         }
       }
 
+      // Tier 2: Resilient High-Resolution FLUX Engine
       if (!buffer) {
         if (isGradioSpaceUrl(options.baseUrl)) {
           try {
@@ -451,7 +503,6 @@ async function fetchSingleImage(
           const response = await fetch(url, {
             headers: {
               accept: "image/jpeg,image/png,image/webp,*/*",
-              referer: "https://pollinations.ai",
             },
             signal: AbortSignal.timeout(options.timeoutMs),
           });
@@ -471,32 +522,12 @@ async function fetchSingleImage(
             continue;
           }
         } else {
-          const fallbackUrl = CURATED_TECH_IMAGES[index % CURATED_TECH_IMAGES.length]!;
-          try {
-            const fbRes = await fetch(fallbackUrl, {
-              headers: { accept: "image/jpeg,image/png,*/*" },
-              signal: AbortSignal.timeout(8_000),
-            });
-            if (fbRes.ok) {
-              const fbBuf = Buffer.from(await fbRes.arrayBuffer());
-              const fbFmt = detectImageFormat(fbBuf);
-              if (fbFmt) {
-                buffer = fbBuf;
-                format = fbFmt;
-                url = fallbackUrl;
-              }
-            }
-          } catch {
-            // Network fallback failed, proceed to local generation
-          }
-
-          if (!buffer || !format) {
-            const localJpg = join(campaignDir, `image-${index + 1}.jpg`);
-            if (generateFallbackGradientImage(localJpg, width, height, index)) {
-              buffer = readFileSync(localJpg);
-              format = "jpeg";
-              url = `local://synthesized-gradient-${index + 1}.jpg`;
-            }
+          // If network failed, generate clean fallback gradient without Unsplash
+          const localJpg = join(campaignDir, `image-${index + 1}.jpg`);
+          if (generateFallbackGradientImage(localJpg, width, height, index)) {
+            buffer = readFileSync(localJpg);
+            format = "jpeg";
+            url = `local://synthesized-gradient-${index + 1}.jpg`;
           }
         }
       }
@@ -565,32 +596,86 @@ export async function generateMarketingImages(
 
   const prompts = input.prompts.slice(0, 6);
 
-  const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
+  if (options.baseUrl) {
+    const baseUrl = options.baseUrl;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
 
-  const images: GeneratedMarketingImage[] = [];
-  const failed: Array<{ index: number; prompt: string; error: string }> = [];
+    const images: GeneratedMarketingImage[] = [];
+    const failed: Array<{ index: number; prompt: string; error: string }> = [];
 
-  const settled = await Promise.allSettled(
-    prompts.map((spec, idx) =>
-      fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries }),
-    ),
-  );
+    const settled = await Promise.allSettled(
+      prompts.map((spec, idx) =>
+        fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries }),
+      ),
+    );
 
-  settled.forEach((item, idx) => {
-    if (item.status === "fulfilled") {
-      images.push(item.value);
-    } else {
-      failed.push({
-        index: idx + 1,
-        prompt: prompts[idx]?.prompt ?? "",
-        error: item.reason instanceof Error ? item.reason.message : String(item.reason),
-      });
+    settled.forEach((item, idx) => {
+      if (item.status === "fulfilled") {
+        images.push(item.value);
+      } else {
+        failed.push({
+          index: idx + 1,
+          prompt: prompts[idx]?.prompt ?? "",
+          error: item.reason instanceof Error ? item.reason.message : String(item.reason),
+        });
+      }
+    });
+
+    return { campaignSlug, campaignDir, images, failed };
+  }
+
+  const searcher = options.imageSearcher ?? new ProductImageSearcher();
+  const downloader = options.imageDownloader ?? new ProductImageDownloader();
+
+  const baseQuery =
+    prompts[0]?.prompt?.trim() || campaignSlug.replace(/-/g, " ");
+  const primaryQuery =
+    /\b(official|product|interface|hardware|software|launch|press|app)\b/i.test(baseQuery)
+      ? baseQuery
+      : `${baseQuery} official product`;
+
+  try {
+    let allCandidates: ProductImageCandidate[] = await searcher.search(primaryQuery).catch(() => []);
+    if (allCandidates.length < prompts.length * 3 && prompts.length > 1) {
+      for (let i = 1; i < prompts.length; i++) {
+        const extraQuery = prompts[i]?.prompt?.trim();
+        if (extraQuery && extraQuery !== primaryQuery) {
+          const extra = await searcher.search(extraQuery).catch(() => []);
+          allCandidates = allCandidates.concat(extra);
+        }
+      }
     }
-  });
 
-  return { campaignSlug, campaignDir, images, failed };
+    const cleanCandidates = filterCandidates(allCandidates);
+    const downloaded = await downloader.downloadExact(
+      cleanCandidates,
+      campaignDir,
+      prompts.length,
+    );
+
+    const images: GeneratedMarketingImage[] = downloaded.map((item, idx) => ({
+      index: item.index,
+      label: prompts[idx]?.label?.trim() || item.label,
+      prompt: prompts[idx]?.prompt?.trim() || primaryQuery,
+      filePath: item.filePath,
+      url: item.url,
+      mimeType: item.mimeType,
+      width: item.width,
+      height: item.height,
+      bytes: item.bytes,
+    }));
+
+    return { campaignSlug, campaignDir, images, failed: [] };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const failed = prompts.map((p, idx) => ({
+      index: idx + 1,
+      prompt: p.prompt,
+      error: errorMsg,
+    }));
+    return { campaignSlug, campaignDir, images: [], failed };
+  }
 }
 
 export async function saveMarketingDraft(
@@ -957,48 +1042,44 @@ export async function generateMarketingVideoWorkflow(
 
   const videoOutputPath = join(campaignDir, `${campaignSlug}-video.mp4`);
 
-  let renderOutput: VideoRenderOutput;
-  try {
-    const beatManifest: CampaignBeatManifest = Array.isArray(input.beats) && input.beats.length > 0
-      ? {
-          campaignSlug,
-          targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : 60,
-          styleTheme: "retro_tech_newspaper",
-          beats: input.beats.map((b, idx) => ({
-            ...b,
-            imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
-          })),
-        }
-      : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
+  const totalBeatsCount = Array.isArray(input.beats) && input.beats.length > 0 ? input.beats.length : adjustedScenes.length;
+  const defaultBeatEstimateMs = Math.max(2000, Math.round(totalAudioMs / Math.max(1, totalBeatsCount)));
 
-    const motionResult = await renderBeatMotionVideo({
-      manifest: beatManifest,
-      audioPath: mixedAudio.mixedAudioPath,
-      outputPath: videoOutputPath,
-      fps: 30,
-      width: ratio === "16:9" ? 1920 : 1080,
-      height: ratio === "16:9" ? 1080 : 1920,
-    });
+  const beatManifest: CampaignBeatManifest = Array.isArray(input.beats) && input.beats.length > 0
+    ? {
+        campaignSlug,
+        targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : Math.round(totalAudioMs / 1000),
+        styleTheme: "retro_tech_newspaper",
+        beats: input.beats.map((b, idx) => ({
+          beatIndex: idx + 1,
+          visualPrompt: b.visualPrompt || b.narration || `Beat ${idx + 1}`,
+          cameraMotion: b.cameraMotion || "slow_zoom_in",
+          ...b,
+          durationEstimateMs: Number.isFinite(b.durationEstimateMs) && Number(b.durationEstimateMs) > 0
+            ? Number(b.durationEstimateMs)
+            : defaultBeatEstimateMs,
+          imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
+        })),
+      }
+    : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
 
-    renderOutput = {
-      videoPath: motionResult.videoPath,
-      width: motionResult.width,
-      height: motionResult.height,
-      durationSeconds: motionResult.durationSeconds,
-      bytes: motionResult.bytes,
-      fps: 30,
-    };
-  } catch (error) {
-    console.warn("[studio] Beat motion rendering fallback to legacy compiler:", error);
-    renderOutput = await renderMarketingVideo({
-      campaignSlug,
-      scenes: adjustedScenes,
-      audioPath: mixedAudio.mixedAudioPath,
-      ratio,
-      outputPath: videoOutputPath,
-      brandName,
-    });
-  }
+  const motionResult = await renderBeatMotionVideo({
+    manifest: beatManifest,
+    audioPath: mixedAudio.mixedAudioPath,
+    outputPath: videoOutputPath,
+    fps: 30,
+    width: ratio === "16:9" ? 1920 : 1080,
+    height: ratio === "16:9" ? 1080 : 1920,
+  });
+
+  const renderOutput: VideoRenderOutput = {
+    videoPath: motionResult.videoPath,
+    width: motionResult.width,
+    height: motionResult.height,
+    durationSeconds: motionResult.durationSeconds,
+    bytes: motionResult.bytes,
+    fps: 30,
+  };
 
   const narrationSeconds = Math.round(speechOutput.durationMs / 100) / 10;
   const narrationGap = requestedDurationMs > 0 && speechOutput.durationMs < requestedDurationMs * 0.9
@@ -1029,7 +1110,7 @@ export async function generateMarketingVideoWorkflow(
     bytes: renderOutput.bytes,
     ratio,
     nextStepHint:
-      `Video rendering complete! Call agents_attach_file with path: "${renderOutput.videoPath}". Do NOT invent paths like /home/cua/workspace. To publish or re-share this video later, reuse this same file; do not render it again.${narrationGap}`,
+      `Video rendering complete! Video saved at: "${renderOutput.videoPath}". Report this videoPath and duration to RoMes/user. To publish or re-share this video later, reuse this same file; do not render it again.${narrationGap}`,
   };
 }
 

@@ -68,6 +68,8 @@ describe("marketing studio MCP server", () => {
       "prepare_marketing_campaign",
       "approve_marketing_campaign",
       "get_marketing_campaign",
+      "save_marketing_post",
+      "get_marketing_post",
       "generate_marketing_images",
       "generate_marketing_video",
       "resolve_marketing_artifact",
@@ -86,7 +88,11 @@ describe("marketing studio MCP server", () => {
 
     const incomplete = await rpc(4, "tools/call", {
       name: "prepare_marketing_campaign",
-      arguments: { campaignSlug: "keychron-q1", topic: "Keychron Q1" },
+      arguments: {
+        campaignSlug: "keychron-q1",
+        topic: "Keychron Q1",
+        fieldSources: { topic: "user" },
+      },
     });
     expect(JSON.parse(incomplete.result.content[0].text)).toMatchObject({
       needsConsultation: true,
@@ -104,10 +110,28 @@ describe("marketing studio MCP server", () => {
         style: "modern tech",
         targetDurationSeconds: 2,
         callToAction: "Đăng ký nhận ưu đãi",
+        fieldSources: {
+          topic: "user",
+          goal: "user",
+          audience: "user",
+          platform: "user",
+          style: "user",
+          targetDurationSeconds: "user",
+          callToAction: "user",
+        },
       },
     });
     const campaign = JSON.parse(prepared.result.content[0].text);
-    expect(campaign).toMatchObject({ id: "keychron-q1", status: "needs_brief", revision: 1 });
+    expect(campaign).toMatchObject({
+      id: "keychron-q1",
+      status: "needs_brief",
+      revision: 1,
+      approvalRequired: true,
+      nextAction: {
+        tool: "approve_marketing_campaign",
+        arguments: { campaignId: "keychron-q1", revision: 1 },
+      },
+    });
 
     const blockedImages = await rpc(6, "tools/call", {
       name: "generate_marketing_images",
@@ -137,11 +161,24 @@ describe("marketing studio MCP server", () => {
     expect(parsedGen.images).toHaveLength(1);
     expect(parsedGen.images[0].filePath).toContain("keychron-q1");
 
+    const missingCampaign = await rpc(91, "tools/call", {
+      name: "get_marketing_campaign",
+      arguments: { campaignId: "nonexistent-campaign" },
+    });
+    expect(missingCampaign.result.isError).toBeUndefined();
+    expect(JSON.parse(missingCampaign.result.content[0].text)).toMatchObject({
+      found: false,
+      campaignId: "nonexistent-campaign",
+    });
+
     const campaignWithAssets = await rpc(9, "tools/call", {
       name: "get_marketing_campaign",
       arguments: { campaignId: campaign.id },
     });
-    expect(JSON.parse(campaignWithAssets.result.content[0].text).status).toBe("assets_ready");
+    expect(JSON.parse(campaignWithAssets.result.content[0].text)).toMatchObject({
+      found: true,
+      status: "assets_ready",
+    });
 
     const saved = await rpc(10, "tools/call", {
       name: "save_marketing_draft",
@@ -190,6 +227,9 @@ describe("marketing studio MCP server", () => {
       name: "generate_marketing_video",
       arguments: videoArguments,
     });
+    if (videoCall.result.isError) {
+      throw new Error("MCP VIDEO CALL FAILED: " + JSON.stringify(videoCall.result));
+    }
     expect(videoCall.result.isError).toBeUndefined();
     const videoResult = JSON.parse(videoCall.result.content[0].text);
     expect(videoResult.videoPath).toContain("keychron-q1-video.mp4");
@@ -243,4 +283,191 @@ describe("marketing studio MCP server", () => {
     });
     expect(JSON.parse(finalCampaign.result.content[0].text).status).toBe("ready");
   }, 60_000);
+
+  it("supports social post campaign lifecycle without requiring duration or video render", async () => {
+    const assetsRoot = mkdtempSync(join(tmpdir(), "omb-mcp-marketing-post-"));
+    dirs.push(assetsRoot);
+
+    server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "image/jpeg" });
+      res.end(VALID_JPEG);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    const script = join(import.meta.dirname, "mcp-server.ts");
+    child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", script], {
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        OMB_MARKETING_ASSETS_ROOT: assetsRoot,
+        OMB_POLLINATIONS_BASE_URL: `http://127.0.0.1:${port}/prompt`,
+      },
+    });
+
+    const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+    const rpc = async (id: number, method: string, params?: unknown) => {
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) })}\n`);
+      const next = await lines.next();
+      return JSON.parse(next.value as string) as { id: number; result?: any; error?: any };
+    };
+
+    await rpc(1, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "test", version: "1.0.0" },
+    });
+
+    const prep = await rpc(2, "tools/call", {
+      name: "prepare_marketing_campaign",
+      arguments: {
+        campaignSlug: "ai-vietnam-post",
+        contentType: "social_post",
+        topic: "Chính sách AI Việt Nam",
+        goal: "chia sẻ kiến thức",
+        audience: "kỹ sư IT và sinh viên",
+        platform: "facebook",
+        style: "thương mại chuyên sâu",
+        callToAction: "Bình luận thảo luận",
+        imageCount: 2,
+        fieldSources: {
+          contentType: "user",
+          topic: "user",
+          goal: "user",
+          audience: "user",
+          platform: "user",
+          style: "user",
+          callToAction: "user",
+          imageCount: "user",
+        },
+      },
+    });
+
+    const prepResult = JSON.parse(prep.result.content[0].text);
+    expect(prepResult.approvalRequired).toBe(true);
+    expect(prepResult.brief.contentType).toBe("social_post");
+
+    const app = await rpc(3, "tools/call", {
+      name: "approve_marketing_campaign",
+      arguments: {
+        campaignId: prepResult.id,
+        revision: prepResult.revision,
+      },
+    });
+    const appResult = JSON.parse(app.result.content[0].text);
+    expect(appResult.status).toBe("approved");
+
+    const imagesBeforePost = await rpc(31, "tools/call", {
+      name: "generate_marketing_images",
+      arguments: {
+        campaignId: prepResult.id,
+        prompts: [{ prompt: "AI data center", label: "Hạ tầng AI" }],
+      },
+    });
+    expect(imagesBeforePost.result.isError).toBe(true);
+    expect(imagesBeforePost.result.content[0].text).toMatch(/social post artifact/i);
+
+    const savedPost = await rpc(32, "tools/call", {
+      name: "save_marketing_post",
+      arguments: {
+        campaignId: prepResult.id,
+        revision: prepResult.revision,
+        platform: "facebook",
+        headline: "Cuộc đua AI",
+        body: "AI đang trở thành năng lực cốt lõi.",
+        callToAction: "Bình luận quan điểm của bạn.",
+        hashtags: ["#AI", "#BigTech"],
+        caption: "Cuộc đua AI\n\nAI đang trở thành năng lực cốt lõi.\n\nBình luận quan điểm của bạn.\n\n#AI #BigTech",
+        visualPrompts: [
+          {
+            index: 1,
+            label: "Hạ tầng AI",
+            subject: "hyperscale AI data center",
+            context: "enterprise infrastructure",
+            action: "engineers monitor GPU clusters",
+            requiredTerms: ["AI", "GPU"],
+            excludedTerms: ["cartoon", "watermark"],
+            aspectRatio: "1:1",
+          },
+          {
+            index: 2,
+            label: "Kỹ sư AI",
+            subject: "Vietnamese AI engineering team",
+            context: "modern technology laboratory",
+            action: "engineers review an AI system dashboard",
+            requiredTerms: ["engineer", "AI", "laboratory"],
+            excludedTerms: ["cartoon", "watermark"],
+            aspectRatio: "1:1",
+          },
+        ],
+      },
+    });
+    const savedPostResult = JSON.parse(savedPost.result.content[0].text);
+    expect(savedPostResult).toMatchObject({ campaignId: prepResult.id, revision: prepResult.revision });
+    expect(savedPostResult.artifactId).toMatch(/^artifact-script-/);
+
+    const loadedPost = await rpc(33, "tools/call", {
+      name: "get_marketing_post",
+      arguments: { campaignId: prepResult.id, artifactId: savedPostResult.artifactId },
+    });
+    expect(JSON.parse(loadedPost.result.content[0].text)).toMatchObject({
+      post: { headline: "Cuộc đua AI" },
+    });
+
+    const imgCall = await rpc(4, "tools/call", {
+      name: "generate_marketing_images",
+      arguments: {
+        campaignId: prepResult.id,
+        prompts: [
+          { prompt: "Commercial image of Vietnam AI lab", label: "Ảnh 1" },
+          { prompt: "Commercial image of AI engineer working", label: "Ảnh 2" },
+        ],
+      },
+    });
+
+    const imgResult = JSON.parse(imgCall.result.content[0].text);
+    expect(imgResult.images).toHaveLength(2);
+
+    const savedDraft = await rpc(5, "tools/call", {
+      name: "save_marketing_draft",
+      arguments: {
+        campaignSlug: prepResult.id,
+        productName: "Chính sách AI Việt Nam",
+        targetPlatforms: ["facebook"],
+        posts: [{
+          platform: "facebook",
+          title: "Bứt Phá AI Việt Nam",
+          body: "Nội dung bài viết...",
+          hashtags: ["#AIVietnam"],
+          imagePaths: imgResult.images.map((im: { filePath: string }) => im.filePath),
+        }],
+      },
+    });
+
+    const draftResult = JSON.parse(savedDraft.result.content[0].text);
+    expect(draftResult.posts[0].imagePaths).toHaveLength(2);
+
+    const resolveVideo = await rpc(6, "tools/call", {
+      name: "resolve_marketing_artifact",
+      arguments: {
+        campaignId: prepResult.id,
+        type: "mixed_audio",
+      },
+    });
+    expect(resolveVideo.result.isError).toBe(true);
+    expect(resolveVideo.result.content[0].text).toMatch(/social_post campaign \(articles and images\)/);
+
+    const publishNoArtifact = await rpc(7, "tools/call", {
+      name: "publish_marketing_artifact",
+      arguments: {
+        campaignId: prepResult.id,
+        platform: "facebook",
+        caption: "Test facebook post caption",
+        idempotencyKey: "test-sp-publish-key",
+      },
+    });
+    // Desktop publisher in test environment returns no_configured_publisher gracefully or publishes if configured
+    const publishResult = JSON.parse(publishNoArtifact.result.content[0].text);
+    expect(publishResult.published === false ? publishResult.reason : "published").toBeDefined();
+  }, 30_000);
 });

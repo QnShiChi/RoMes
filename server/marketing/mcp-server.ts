@@ -8,6 +8,13 @@ import { CampaignStoreError, createCampaignStore } from "./campaign-store.ts";
 import { renderApprovedCampaign } from "./campaign-workflow.ts";
 import { routeMarketingIntent } from "./intent.ts";
 import { createPublisherGateway, type PublishPlatform } from "./publisher-gateway.ts";
+import { AgentDesktopPublisherAdapter } from "./social-scripts/publisher-adapter.ts";
+import {
+  latestMarketingPostArtifact,
+  readMarketingPostArtifact,
+  saveMarketingPostArtifact,
+  type MarketingPostInput,
+} from "./social-post-artifact.ts";
 import {
   generateMarketingImages,
   generateMarketingVideoWorkflow,
@@ -29,7 +36,11 @@ const BASE_URL =
   undefined;
 
 const CAMPAIGNS = createCampaignStore(ASSETS_ROOT);
-const PUBLISHER = createPublisherGateway(CAMPAIGNS, []);
+const DESKTOP_ADAPTERS =
+  process.env.OMB_ENABLE_DESKTOP_PUBLISHER === "1" || process.env.NODE_ENV !== "test"
+    ? [new AgentDesktopPublisherAdapter()]
+    : [];
+const PUBLISHER = createPublisherGateway(CAMPAIGNS, DESKTOP_ADAPTERS);
 
 const TOOLS = [
   {
@@ -55,8 +66,32 @@ const TOOLS = [
         style: { type: "string" },
         targetDurationSeconds: { type: "number" },
         callToAction: { type: "string" },
+        contentType: {
+          type: "string",
+          enum: ["social_post", "video_campaign"],
+          description: "Use 'social_post' for Facebook, LinkedIn, Instagram written articles; use 'video_campaign' for video clips.",
+        },
+        imageCount: {
+          type: "number",
+          description: "Exact number of commercial images to generate (e.g. 1 cover, 3 or 4 carousel images).",
+        },
+        fieldSources: {
+          type: "object",
+          description: "For every supplied brief field, mark whether it came from the user's words or is a proposed default.",
+          properties: Object.fromEntries([
+            "topic",
+            "goal",
+            "audience",
+            "platform",
+            "style",
+            "targetDurationSeconds",
+            "callToAction",
+            "contentType",
+            "imageCount",
+          ].map((field) => [field, { type: "string", enum: ["user", "proposed_default"] }])),
+        },
       },
-      required: ["campaignSlug"],
+      required: ["campaignSlug", "fieldSources"],
     },
   },
   {
@@ -89,9 +124,56 @@ const TOOLS = [
     },
   },
   {
+    name: "save_marketing_post",
+    description: "Validate and persist Poppy's exact social post and visual directions for one approved campaign revision before Finch starts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        revision: { type: "number" },
+        platform: { type: "string" },
+        headline: { type: "string" },
+        body: { type: "string" },
+        callToAction: { type: "string" },
+        hashtags: { type: "array", items: { type: "string" } },
+        caption: { type: "string" },
+        visualPrompts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "number" },
+              label: { type: "string" },
+              subject: { type: "string" },
+              context: { type: "string" },
+              action: { type: "string" },
+              requiredTerms: { type: "array", items: { type: "string" } },
+              excludedTerms: { type: "array", items: { type: "string" } },
+              aspectRatio: { type: "string", enum: ["1:1", "4:5", "16:9"] },
+            },
+            required: ["index", "label", "subject", "context", "action", "requiredTerms", "excludedTerms", "aspectRatio"],
+          },
+        },
+      },
+      required: ["campaignId", "revision", "platform", "headline", "body", "callToAction", "hashtags", "caption", "visualPrompts"],
+    },
+  },
+  {
+    name: "get_marketing_post",
+    description: "Load one exact persisted social-post artifact by campaign and artifact ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        artifactId: { type: "string" },
+      },
+      required: ["campaignId", "artifactId"],
+    },
+  },
+  {
     name: "generate_marketing_images",
     description:
-      "Generate 1 to 12 high-quality marketing or beat keyframe images using Google AI Studio (Nano Banana 2 Lite / gemini-3.1-flash-lite-image, with multi-turn product consistency) and save them as local .jpg files for chat preview and social upload.",
+      "Search for 1 to 12 relevant real marketing images, validate and save them locally for chat preview and social upload.",
     inputSchema: {
       type: "object",
       properties: {
@@ -101,13 +183,13 @@ const TOOLS = [
         },
         prompts: {
           type: "array",
-          description: "List of 1 to 12 detailed English visual prompts for image generation corresponding to video beats.",
+          description: "List of 1 to 12 precise English search descriptions corresponding to the persisted visual directions.",
           items: {
             type: "object",
             properties: {
               prompt: {
                 type: "string",
-                description: "Detailed English description of the scene, product, lighting, and style.",
+                description: "Specific search description including subject, context, action, required terms, and exclusions.",
               },
               label: {
                 type: "string",
@@ -206,7 +288,7 @@ const TOOLS = [
             "Video length the user asked for, in seconds. The video is never shorter than this; write about 2.3 Vietnamese words per second of script to fill it with narration.",
         },
       },
-      required: ["campaignId", "campaignSlug", "script", "scenes", "targetDurationSeconds"],
+      required: ["campaignId", "campaignSlug", "script"],
     },
   },
   {
@@ -228,17 +310,17 @@ const TOOLS = [
   },
   {
     name: "publish_marketing_artifact",
-    description: "Publish one ready video through a configured provider. Success requires provider evidence.",
+    description: "Publish one ready video or social post through a configured provider. Success requires provider evidence.",
     inputSchema: {
       type: "object",
       properties: {
         campaignId: { type: "string" },
-        artifactId: { type: "string" },
-        platform: { type: "string", enum: ["tiktok", "facebook"] },
+        artifactId: { type: "string", description: "Optional artifact ID. If omitted, automatically resolves ready campaign video or images." },
+        platform: { type: "string", enum: ["tiktok", "facebook", "x", "linkedin", "instagram"] },
         caption: { type: "string" },
         idempotencyKey: { type: "string" },
       },
-      required: ["campaignId", "artifactId", "platform", "caption", "idempotencyKey"],
+      required: ["campaignId", "platform", "caption", "idempotencyKey"],
     },
   },
   {
@@ -324,6 +406,16 @@ function resolveCampaignId(assetsRoot: string, rawId: string): string {
     const latest = findLatestCampaign(assetsRoot);
     if (latest) return latest;
   }
+  if (existsSync(join(assetsRoot, trimmed, "campaign.json"))) {
+    return trimmed;
+  }
+  try {
+    const dirs = readdirSync(assetsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(join(assetsRoot, d.name, "campaign.json")))
+      .map((d) => d.name);
+    const prefixMatch = dirs.find((d) => d === trimmed || d.startsWith(trimmed) || trimmed.startsWith(d));
+    if (prefixMatch) return prefixMatch;
+  } catch {}
   return trimmed;
 }
 
@@ -344,7 +436,11 @@ async function handleCall(name: string, args: Record<string, unknown>) {
         }],
       };
     }
-    const campaign = CAMPAIGNS.prepare(String(args.campaignSlug ?? ""), assessment.brief);
+    const campaign = CAMPAIGNS.prepare(
+      String(args.campaignSlug ?? ""),
+      assessment.brief,
+      assessment.sources,
+    );
     return {
       content: [{
         type: "text",
@@ -402,6 +498,31 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     }
   }
 
+  if (name === "save_marketing_post") {
+    const campaignId = resolveCampaignId(ASSETS_ROOT, String(args.campaignId ?? ""));
+    const saved = saveMarketingPostArtifact(CAMPAIGNS, ASSETS_ROOT, {
+      ...(args as unknown as MarketingPostInput),
+      campaignId,
+    });
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          campaignId,
+          revision: saved.post.revision,
+          artifactId: saved.artifact.id,
+          path: saved.artifact.path,
+        }, null, 2),
+      }],
+    };
+  }
+
+  if (name === "get_marketing_post") {
+    const campaignId = resolveCampaignId(ASSETS_ROOT, String(args.campaignId ?? ""));
+    const saved = readMarketingPostArtifact(CAMPAIGNS, campaignId, String(args.artifactId ?? ""));
+    return { content: [{ type: "text", text: JSON.stringify(saved, null, 2) }] };
+  }
+
   if (name === "generate_marketing_images") {
     const rawId = String(args.campaignId ?? "").trim();
     const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
@@ -409,12 +530,19 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     if (campaign.status !== "approved" && campaign.status !== "scripting" && campaign.status !== "assets_ready") {
       throw new Error(`Campaign must be approved before image generation; current status is ${campaign.status}`);
     }
+    if (campaign.brief.contentType === "social_post" && !latestMarketingPostArtifact(CAMPAIGNS, campaign.id)) {
+      throw new Error(`Campaign ${campaign.id} has no persisted social post artifact for revision ${campaign.revision}`);
+    }
     const prompts = (Array.isArray(args.prompts) ? args.prompts : []) as ImagePromptSpec[];
     if (prompts.length === 0) throw new Error("At least one image prompt is required");
     const batchKey = `images:${createHash("sha256").update(JSON.stringify(prompts)).digest("hex")}`;
     const current = CAMPAIGNS.get(campaign.id);
     const reusable = current.artifacts.filter((artifact) => artifact.type === "image" && artifact.operationKey.startsWith(`${batchKey}:`) && existsSync(artifact.path));
     if (reusable.length === prompts.length) {
+      const curStatus = CAMPAIGNS.get(campaign.id).status;
+      if (curStatus === "scripting" || curStatus === "approved") {
+        CAMPAIGNS.transition(campaign.id, "assets_ready");
+      }
       return {
         content: [{
           type: "text",
@@ -463,7 +591,15 @@ async function handleCall(name: string, args: Record<string, unknown>) {
       },
     }));
     CAMPAIGNS.finishOperation(campaign.id, batchKey, artifacts[0]!.id);
-    if (CAMPAIGNS.get(campaign.id).status === "scripting") CAMPAIGNS.transition(campaign.id, "assets_ready");
+    const postStatus = CAMPAIGNS.get(campaign.id).status;
+    if (postStatus === "scripting" || postStatus === "approved") {
+      CAMPAIGNS.transition(campaign.id, "assets_ready");
+      if (campaign.brief.contentType === "social_post") {
+        CAMPAIGNS.transition(campaign.id, "ready");
+      }
+    } else if (postStatus === "assets_ready" && campaign.brief.contentType === "social_post") {
+      CAMPAIGNS.transition(campaign.id, "ready");
+    }
     return {
       content: [
         {
@@ -523,7 +659,14 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const artifact = type === "video"
       ? CAMPAIGNS.resolveLatestReadyVideo(campaign.id)
       : campaign.artifacts.findLast((candidate) => candidate.type === type && existsSync(candidate.path)) ?? null;
-    if (!artifact) throw new Error(`No ready ${type} artifact exists for campaign ${campaign.id}`);
+    if (!artifact) {
+      if (campaign.brief.contentType === "social_post" && (type === "video" || type === "mixed_audio" || type === "speech")) {
+        throw new Error(
+          `Campaign ${campaign.id} is a social_post campaign (articles and images). It does not produce ${type} artifacts. Use image artifacts or publish directly.`
+        );
+      }
+      throw new Error(`No ready ${type} artifact exists for campaign ${campaign.id}`);
+    }
     return { content: [{ type: "text", text: JSON.stringify(artifact, null, 2) }] };
   }
 
@@ -536,9 +679,21 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const rawId = String(args.campaignId ?? "").trim();
     const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
     const campaign = CAMPAIGNS.get(campaignId);
-    const artifactId = String(args.artifactId ?? "");
-    const artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId && candidate.type === "video");
-    if (!artifact || !existsSync(artifact.path)) throw new Error(`Ready video artifact not found: ${artifactId}`);
+    let artifactId = typeof args.artifactId === "string" ? args.artifactId.trim() : "";
+    let artifact = campaign.artifacts.find((candidate) => candidate.id === artifactId && existsSync(candidate.path));
+    if (!artifact) {
+      if (campaign.brief.contentType === "social_post") {
+        artifact = campaign.artifacts.find((candidate) => candidate.type === "image" && existsSync(candidate.path));
+      } else {
+        artifact = CAMPAIGNS.resolveLatestReadyVideo(campaign.id) ?? undefined;
+      }
+      if (!artifact) {
+        artifact = campaign.artifacts.findLast((candidate) => existsSync(candidate.path));
+      }
+    }
+    if (!artifact || !existsSync(artifact.path)) {
+      throw new Error(`Ready artifact not found for campaign: ${campaignId}`);
+    }
     const platform = String(args.platform ?? "") as PublishPlatform;
     const capabilities = await PUBLISHER.capabilities();
     if (!capabilities.some((capability) => capability.platform === platform)) {
@@ -548,7 +703,7 @@ async function handleCall(name: string, args: Record<string, unknown>) {
           text: JSON.stringify({
             published: false,
             reason: "no_configured_publisher",
-            message: `No real ${platform} publisher is configured. Reuse the ready video artifact for manual upload.`,
+            message: `No real ${platform} publisher is configured. Reuse the ready ${artifact.type === "video" ? "video" : "post"} artifact for manual upload.`,
             artifact: { id: artifact.id, path: artifact.path },
           }, null, 2),
         }],
@@ -556,7 +711,7 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     }
     const evidence = await PUBLISHER.publish({
       campaignId: campaign.id,
-      artifactId,
+      artifactId: artifact.id,
       platform,
       caption: String(args.caption ?? ""),
       idempotencyKey: String(args.idempotencyKey ?? ""),
