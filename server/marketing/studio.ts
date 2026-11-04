@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
 import { legacyScenesToBeatManifest, type CampaignBeatManifest, type NarrativeBeat } from "./beat-schema.ts";
 import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
-import { generateMarketingSpeech } from "./speech-engine.ts";
+import { generateMarketingSpeech, resolveGeminiApiKey } from "./speech-engine.ts";
 import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
 
@@ -390,6 +390,64 @@ export async function fetchFromUnsplash(
   return { buffer, url: downloadUrl };
 }
 
+export const GEMINI_IMAGE_MODELS = [
+  "gemini-3.1-flash-lite-image",
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
+] as const;
+
+export async function fetchFromGeminiImageApi(
+  prompt: string,
+  apiKey: string,
+  timeoutMs = 25_000,
+): Promise<{ buffer: Buffer; url: string; model: string } | null> {
+  for (const model of GEMINI_IMAGE_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ["IMAGE"],
+          },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              inlineData?: {
+                mimeType?: string;
+                data?: string;
+              };
+            }>;
+          };
+        }>;
+      };
+
+      const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (b64) {
+        return {
+          buffer: Buffer.from(b64, "base64"),
+          url: `data:image/jpeg;base64,${b64.slice(0, 32)}...`,
+          model,
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function fetchSingleImage(
   spec: ImagePromptSpec,
   index: number,
@@ -406,29 +464,23 @@ async function fetchSingleImage(
       let buffer: Buffer | null = null;
       let url = "";
 
+      // Tier 1: Try Google AI Studio Image API (if not mock local testing server)
       if (!options.baseUrl.includes("127.0.0.1") && !options.baseUrl.includes("localhost")) {
-        const unsplashKey = resolveUnsplashKey();
-        if (unsplashKey) {
+        const geminiApiKey = resolveGeminiApiKey();
+        if (geminiApiKey) {
           try {
-            const query = extractKeywordsForSearch(spec.prompt);
-            const unsplashOut = await fetchFromUnsplash(
-              query,
-              width,
-              height,
-              unsplashKey,
-              index,
-              options.timeoutMs,
-            );
-            if (unsplashOut) {
-              buffer = unsplashOut.buffer;
-              url = unsplashOut.url;
+            const geminiOut = await fetchFromGeminiImageApi(spec.prompt.trim(), geminiApiKey, options.timeoutMs);
+            if (geminiOut) {
+              buffer = geminiOut.buffer;
+              url = geminiOut.url;
             }
           } catch {
-            // Unsplash query or download failed; proceed to next provider
+            // Fall back to Tier 2 FLUX on quota/API exhaustion
           }
         }
       }
 
+      // Tier 2: Resilient High-Resolution FLUX Engine
       if (!buffer) {
         if (isGradioSpaceUrl(options.baseUrl)) {
           try {
@@ -471,32 +523,12 @@ async function fetchSingleImage(
             continue;
           }
         } else {
-          const fallbackUrl = CURATED_TECH_IMAGES[index % CURATED_TECH_IMAGES.length]!;
-          try {
-            const fbRes = await fetch(fallbackUrl, {
-              headers: { accept: "image/jpeg,image/png,*/*" },
-              signal: AbortSignal.timeout(8_000),
-            });
-            if (fbRes.ok) {
-              const fbBuf = Buffer.from(await fbRes.arrayBuffer());
-              const fbFmt = detectImageFormat(fbBuf);
-              if (fbFmt) {
-                buffer = fbBuf;
-                format = fbFmt;
-                url = fallbackUrl;
-              }
-            }
-          } catch {
-            // Network fallback failed, proceed to local generation
-          }
-
-          if (!buffer || !format) {
-            const localJpg = join(campaignDir, `image-${index + 1}.jpg`);
-            if (generateFallbackGradientImage(localJpg, width, height, index)) {
-              buffer = readFileSync(localJpg);
-              format = "jpeg";
-              url = `local://synthesized-gradient-${index + 1}.jpg`;
-            }
+          // If network failed, generate clean fallback gradient without Unsplash
+          const localJpg = join(campaignDir, `image-${index + 1}.jpg`);
+          if (generateFallbackGradientImage(localJpg, width, height, index)) {
+            buffer = readFileSync(localJpg);
+            format = "jpeg";
+            url = `local://synthesized-gradient-${index + 1}.jpg`;
           }
         }
       }
@@ -957,48 +989,44 @@ export async function generateMarketingVideoWorkflow(
 
   const videoOutputPath = join(campaignDir, `${campaignSlug}-video.mp4`);
 
-  let renderOutput: VideoRenderOutput;
-  try {
-    const beatManifest: CampaignBeatManifest = Array.isArray(input.beats) && input.beats.length > 0
-      ? {
-          campaignSlug,
-          targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : 60,
-          styleTheme: "retro_tech_newspaper",
-          beats: input.beats.map((b, idx) => ({
-            ...b,
-            imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
-          })),
-        }
-      : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
+  const totalBeatsCount = Array.isArray(input.beats) && input.beats.length > 0 ? input.beats.length : adjustedScenes.length;
+  const defaultBeatEstimateMs = Math.max(2000, Math.round(totalAudioMs / Math.max(1, totalBeatsCount)));
 
-    const motionResult = await renderBeatMotionVideo({
-      manifest: beatManifest,
-      audioPath: mixedAudio.mixedAudioPath,
-      outputPath: videoOutputPath,
-      fps: 30,
-      width: ratio === "16:9" ? 1920 : 1080,
-      height: ratio === "16:9" ? 1080 : 1920,
-    });
+  const beatManifest: CampaignBeatManifest = Array.isArray(input.beats) && input.beats.length > 0
+    ? {
+        campaignSlug,
+        targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : Math.round(totalAudioMs / 1000),
+        styleTheme: "retro_tech_newspaper",
+        beats: input.beats.map((b, idx) => ({
+          beatIndex: idx + 1,
+          visualPrompt: b.visualPrompt || b.narration || `Beat ${idx + 1}`,
+          cameraMotion: b.cameraMotion || "slow_zoom_in",
+          ...b,
+          durationEstimateMs: Number.isFinite(b.durationEstimateMs) && Number(b.durationEstimateMs) > 0
+            ? Number(b.durationEstimateMs)
+            : defaultBeatEstimateMs,
+          imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
+        })),
+      }
+    : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
 
-    renderOutput = {
-      videoPath: motionResult.videoPath,
-      width: motionResult.width,
-      height: motionResult.height,
-      durationSeconds: motionResult.durationSeconds,
-      bytes: motionResult.bytes,
-      fps: 30,
-    };
-  } catch (error) {
-    console.warn("[studio] Beat motion rendering fallback to legacy compiler:", error);
-    renderOutput = await renderMarketingVideo({
-      campaignSlug,
-      scenes: adjustedScenes,
-      audioPath: mixedAudio.mixedAudioPath,
-      ratio,
-      outputPath: videoOutputPath,
-      brandName,
-    });
-  }
+  const motionResult = await renderBeatMotionVideo({
+    manifest: beatManifest,
+    audioPath: mixedAudio.mixedAudioPath,
+    outputPath: videoOutputPath,
+    fps: 30,
+    width: ratio === "16:9" ? 1920 : 1080,
+    height: ratio === "16:9" ? 1080 : 1920,
+  });
+
+  const renderOutput: VideoRenderOutput = {
+    videoPath: motionResult.videoPath,
+    width: motionResult.width,
+    height: motionResult.height,
+    durationSeconds: motionResult.durationSeconds,
+    bytes: motionResult.bytes,
+    fps: 30,
+  };
 
   const narrationSeconds = Math.round(speechOutput.durationMs / 100) / 10;
   const narrationGap = requestedDurationMs > 0 && speechOutput.durationMs < requestedDurationMs * 0.9
@@ -1029,7 +1057,7 @@ export async function generateMarketingVideoWorkflow(
     bytes: renderOutput.bytes,
     ratio,
     nextStepHint:
-      `Video rendering complete! Call agents_attach_file with path: "${renderOutput.videoPath}". Do NOT invent paths like /home/cua/workspace. To publish or re-share this video later, reuse this same file; do not render it again.${narrationGap}`,
+      `Video rendering complete! Video saved at: "${renderOutput.videoPath}". Report this videoPath and duration to RoMes/user. To publish or re-share this video later, reuse this same file; do not render it again.${narrationGap}`,
   };
 }
 
