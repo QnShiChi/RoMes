@@ -62,6 +62,34 @@ describe("marketing consultation", () => {
     });
   });
 
+  it("does not use video language while consulting on a social post", () => {
+    const result = assessMarketingBrief({
+      contentType: "social_post",
+      topic: "Muse AI của Meta",
+      goal: "Tăng tương tác",
+      audience: "Người quan tâm AI",
+      platform: "Facebook",
+      style: "Phân tích dễ hiểu",
+      imageCount: 5,
+      fieldSources: {
+        contentType: "user",
+        topic: "user",
+        goal: "user",
+        audience: "user",
+        platform: "user",
+        style: "user",
+        imageCount: "user",
+      },
+    });
+
+    expect(result.complete).toBe(false);
+    if (result.complete) throw new Error("expected an incomplete brief");
+    expect(result.questions).toEqual([
+      "Anh muốn người đọc thực hiện hành động nào sau khi đọc bài viết?",
+    ]);
+    expect(result.questions.join(" ").toLowerCase()).not.toContain("video");
+  });
+
   it("normalizes a complete brief", () => {
     expect(assessMarketingBrief({
       topic: " AI Agent ",

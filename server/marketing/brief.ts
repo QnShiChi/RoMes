@@ -76,14 +76,18 @@ const SOURCE_FIELDS: MarketingBriefSourceField[] = [
   "targetDurationSeconds",
 ];
 
-const QUESTIONS: Record<MarketingBriefField, string> = {
+const QUESTIONS: Record<Exclude<MarketingBriefField, "callToAction">, string> = {
   topic: "Anh muốn làm nội dung về chủ đề hoặc sản phẩm nào?",
   goal: "Mục tiêu chính là nhận diện, tương tác hay tạo khách hàng tiềm năng?",
   audience: "Nội dung nhắm tới nhóm khán giả nào?",
   platform: "Anh muốn dùng nội dung trên TikTok, Facebook hay nền tảng nào?",
   style: "Anh muốn phong cách hiện đại công nghệ, chuyên gia hay gần gũi kể chuyện?",
   targetDurationSeconds: "Thời lượng video mong muốn là khoảng bao nhiêu giây?",
-  callToAction: "Anh muốn người xem thực hiện hành động nào sau video?",
+};
+
+const CALL_TO_ACTION_QUESTIONS: Record<MarketingBrief["contentType"], string> = {
+  social_post: "Anh muốn người đọc thực hiện hành động nào sau khi đọc bài viết?",
+  video_campaign: "Anh muốn người xem thực hiện hành động nào sau video?",
 };
 
 export function assessMarketingBrief(input: MarketingBriefInput): MarketingBriefAssessment {
@@ -132,7 +136,9 @@ export function assessMarketingBrief(input: MarketingBriefInput): MarketingBrief
       complete: false,
       missingFields,
       missingAttribution,
-      questions: missingFields.map((field) => QUESTIONS[field]),
+      questions: missingFields.map((field) =>
+        field === "callToAction" ? CALL_TO_ACTION_QUESTIONS[contentType] : QUESTIONS[field]
+      ),
     };
   }
 
