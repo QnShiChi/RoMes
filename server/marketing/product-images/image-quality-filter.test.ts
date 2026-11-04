@@ -29,4 +29,16 @@ describe("ImageQualityFilter", () => {
     expect(clean).toHaveLength(1);
     expect(clean[0]!.url).toBe("https://valid.com/photo.webp");
   });
+
+  it("filters out video thumbnails and reaction/vlog clickbait", () => {
+    const raw: ProductImageCandidate[] = [
+      { url: "https://i.ytimg.com/vi/uXD6u-CNl9Q/maxres2.jpg", title: "Meta's new AI is it free? - YouTube", width: 1280, height: 720 },
+      { url: "https://vstatic.vietnam.vn/muse.webp", title: "Meta brings Muse AI to Southeast Asia", width: 1200, height: 800 },
+      { url: "https://news.com/dating.jpg", title: "People dating Meta Muse AI chatbot", width: 1200, height: 800 },
+    ];
+
+    const clean = filterCandidates(raw);
+    expect(clean).toHaveLength(1);
+    expect(clean[0]!.url).toBe("https://vstatic.vietnam.vn/muse.webp");
+  });
 });

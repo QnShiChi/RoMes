@@ -628,8 +628,12 @@ export async function generateMarketingImages(
   const searcher = options.imageSearcher ?? new ProductImageSearcher();
   const downloader = options.imageDownloader ?? new ProductImageDownloader();
 
-  const primaryQuery =
+  const baseQuery =
     prompts[0]?.prompt?.trim() || campaignSlug.replace(/-/g, " ");
+  const primaryQuery =
+    /\b(official|product|interface|hardware|software|launch|press|app)\b/i.test(baseQuery)
+      ? baseQuery
+      : `${baseQuery} official product`;
 
   try {
     let allCandidates: ProductImageCandidate[] = await searcher.search(primaryQuery).catch(() => []);
