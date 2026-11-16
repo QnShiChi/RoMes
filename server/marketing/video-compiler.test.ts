@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,4 +100,59 @@ describe("video-compiler", () => {
     expect(result.durationSeconds).toBeGreaterThan(0);
     expect(statSync(result.videoPath).size).toBeGreaterThan(1000);
   }, 60_000);
+
+  it("renders intelligence commercial layouts (telemetry, swarm, chart, outro) through Remotion", async () => {
+    const outputPath = join(tempDir, "commercial-output.mp4");
+    const audioPath = join(tempDir, "audio2.mp3");
+
+    execFileSync("ffmpeg", [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:duration=2",
+      "-c:a",
+      "libmp3lame",
+      audioPath,
+    ]);
+
+    const scenes: MarketingSceneSpec[] = [
+      {
+        type: "telemetry",
+        title: "Khủng hoảng Ngân sách",
+        subtitle: "Lãng phí",
+        durationMs: 1000,
+      },
+      {
+        type: "swarm",
+        title: "RoMes Swarm AI",
+        durationMs: 1000,
+      },
+      {
+        type: "chart",
+        title: "Tăng trưởng Doanh thu",
+        durationMs: 1000,
+      },
+      {
+        type: "outro",
+        title: "Quyết định Thông minh",
+        durationMs: 1000,
+      },
+    ];
+
+    const result = await renderMarketingVideo({
+      campaignSlug: "commercial-demo",
+      scenes,
+      audioPath,
+      ratio: "9:16",
+      outputPath,
+      fps: 24,
+    });
+
+    expect(existsSync(result.videoPath)).toBe(true);
+    expect(result.width).toBe(1080);
+    expect(result.height).toBe(1920);
+    expect(result.durationSeconds).toBeGreaterThan(0);
+    expect(statSync(result.videoPath).size).toBeGreaterThan(1000);
+  }, 90_000);
 });

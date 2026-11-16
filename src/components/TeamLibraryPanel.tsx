@@ -16,6 +16,7 @@ import { GrokFinishSetup, grokSetupLeft } from "./GrokFinishSetup";
 import { TEAM_GLYPHS, TeamImportDetails } from "./TeamImportDetails";
 import { GrokImportFlow } from "./GrokImportFlow";
 import { ReadyBotGallery } from "./ReadyBotGallery";
+import { TeamTemplatesGallery } from "./TeamTemplatesGallery";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
@@ -672,6 +673,7 @@ export function TeamLibraryPanel({
               )}
               {tab === "explore" && (
                 <div>
+                  <TeamTemplatesGallery search={search} onAdded={onClose} />
                   <ReadyBotGallery search={search} onDialog={setNestedDialog} onAdded={onClose} />
                   <div className="mb-3 text-[12px] font-medium text-ink-secondary">
                     {search ? t("templates.searchResults") : t("templates.communityTemplates")}

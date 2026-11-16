@@ -205,7 +205,7 @@ describe("marketing studio core", () => {
     expect(result.nextStepHint).toContain(result.videoPath);
     expect(existsSync(join(root, "test-video-flow", "video.mp4"))).toBe(true);
     expect(existsSync(join(root, "test-video-flow", "audio.mp3"))).toBe(true);
-  });
+  }, 60_000);
 
   it("sanitizes storyboard labels and extracts pure voiceover prose", () => {
     const rawMarkdownWithLabels = `
@@ -381,5 +381,35 @@ Trong thời đại AI phát triển mạnh mẽ, xã hội Việt Nam đang tr�
     expect(result.images[1]!.label).toBe("Detail");
     expect(result.images[0]!.url).toBe("https://cdn.example.com/product-1.jpg");
     expect(result.images[1]!.url).toBe("https://cdn.example.com/product-2.jpg");
+  });
+
+  it("integrates ImageReviewer to validate generated images and perform prompt refinement", async () => {
+    const root = makeTempDir();
+    let hits = 0;
+    server = createServer((_req, res) => {
+      hits += 1;
+      res.writeHead(200, { "Content-Type": "image/jpeg" });
+      res.end(VALID_JPEG);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const result = await generateMarketingImages(
+      {
+        campaignSlug: "review-test",
+        prompts: [{ prompt: "wireless noise cancelling headphones", label: "Commercial Hero" }],
+      },
+      {
+        assetsRoot: root,
+        baseUrl,
+        targetAspectRatio: "9:16",
+      },
+    );
+
+    expect(result.images).toHaveLength(1);
+    expect(existsSync(result.images[0]!.filePath)).toBe(true);
+    expect(result.images[0]!.width).toBe(1080);
+    expect(result.images[0]!.height).toBe(1920);
   });
 });

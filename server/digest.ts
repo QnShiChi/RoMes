@@ -99,7 +99,14 @@ function firstSentence(reply: string): string {
   const flat = reply.replace(/\s+/g, " ").trim();
   const end = flat.search(/[.!?](\s|$)/);
   const sentence = end === -1 ? flat : flat.slice(0, end + 1);
-  return sentence.slice(0, REPLY_CHARS);
+  let safeLen = Math.min(sentence.length, REPLY_CHARS);
+  if (safeLen > 0 && safeLen < sentence.length) {
+    const code = sentence.charCodeAt(safeLen - 1);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      safeLen -= 1;
+    }
+  }
+  return sentence.slice(0, safeLen).toWellFormed();
 }
 
 export function renderDigest(d: TurnDigest): string {

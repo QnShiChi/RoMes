@@ -44,11 +44,19 @@ export class AgentDesktopPublisherAdapter implements PublisherAdapter {
     caption: string;
     idempotencyKey: string;
   }): Promise<PublishEvidence> {
-    const images = input.imagePaths ?? [];
+    const images = [...(input.imagePaths ?? [])];
+    if (input.videoPath && !images.includes(input.videoPath)) {
+      images.push(input.videoPath);
+    }
     let res: SocialPostResult;
 
     if (input.platform === "facebook") {
-      res = await this.fb.publish({ text: input.caption, images, campaignId: input.idempotencyKey });
+      res = await this.fb.publish({
+        text: input.caption,
+        images,
+        campaignId: input.idempotencyKey,
+        videoPath: input.videoPath,
+      });
     } else if (input.platform === "x") {
       res = await this.x.publish({ text: input.caption, images, campaignId: input.idempotencyKey });
     } else if (input.platform === "linkedin") {

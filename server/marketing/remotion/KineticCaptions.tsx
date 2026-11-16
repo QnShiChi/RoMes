@@ -4,11 +4,18 @@ import { captionWindow, parseSubtitleWords, type SubtitleToken } from "./subtitl
 
 export { parseSubtitleWords, type SubtitleToken };
 
-export const KineticCaptions: React.FC<{ text: string; isVertical: boolean }> = ({ text, isVertical }) => {
+export const KineticCaptions: React.FC<{
+  text: string;
+  isVertical: boolean;
+  durationInFrames?: number;
+}> = ({ text, isVertical, durationInFrames: sceneDurationInFrames }) => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames: totalDurationInFrames } = useVideoConfig();
+  const activeDuration = sceneDurationInFrames && sceneDurationInFrames > 0
+    ? sceneDurationInFrames
+    : totalDurationInFrames;
 
-  const tokens = React.useMemo(() => parseSubtitleWords(text, durationInFrames), [text, durationInFrames]);
+  const tokens = React.useMemo(() => parseSubtitleWords(text, activeDuration), [text, activeDuration]);
   if (tokens.length === 0) return null;
   const visible = captionWindow(tokens, frame);
 
@@ -26,10 +33,10 @@ export const KineticCaptions: React.FC<{ text: string; isVertical: boolean }> = 
         gap: "10px 14px",
         padding: "16px 24px",
         borderRadius: "20px",
-        background: "rgba(10, 15, 29, 0.82)",
-        backdropFilter: "blur(16px)",
-        border: "1px solid rgba(99, 102, 241, 0.35)",
-        boxShadow: "0 15px 35px rgba(0, 0, 0, 0.6)",
+        background: "rgba(0, 0, 0, 0.68)",
+        backdropFilter: "blur(14px)",
+        border: "1px solid rgba(255, 255, 255, 0.14)",
+        boxShadow: "0 12px 30px rgba(0, 0, 0, 0.65)",
         zIndex: 50,
       }}
     >
@@ -44,8 +51,10 @@ export const KineticCaptions: React.FC<{ text: string; isVertical: boolean }> = 
         });
 
         const scale = isActive ? 1 + wordSpring * 0.15 : 1;
-        const color = isActive ? "#facc15" : hasPassed ? "#ffffff" : "rgba(255, 255, 255, 0.55)";
-        const textShadow = isActive ? "0 0 16px rgba(250, 204, 21, 0.8)" : "none";
+        const color = isActive ? "#facc15" : hasPassed ? "#ffffff" : "rgba(255, 255, 255, 0.6)";
+        const textShadow = isActive
+          ? "0 0 16px rgba(250, 204, 21, 0.9), 0 2px 6px rgba(0, 0, 0, 0.8)"
+          : "0 2px 4px rgba(0, 0, 0, 0.7)";
 
         return (
           <span

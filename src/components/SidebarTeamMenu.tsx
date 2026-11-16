@@ -6,11 +6,12 @@ import { MENU_ITEM } from "./menu-recipe";
 export { showWhoReportsToWhom } from "./TeamOrgChart";
 
 /** A department's menu, from its line's ⋯ or a right-click on its name. */
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onSetOwner, onSeeReports }: {
+export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onDeleteWithBots, onSetForAll, onSetOwner, onSeeReports }: {
   onAddBots: () => void;
   onRename: () => void;
   onShare: () => void;
   onDelete: () => void;
+  onDeleteWithBots?: () => void;
   onSetForAll?: () => void;
   onSetOwner?: () => void;
   onSeeReports?: () => void;
@@ -25,6 +26,11 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
       <button type="button" role="menuitem" className={item} onClick={onRename}><SquarePen size={16} />{t("team.rename")}</button>
       <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={16} />{t("team.share")}</button>
       <button type="button" role="menuitem" className={cn(item, "text-danger [&>svg]:text-danger")} onClick={onDelete}><Trash2 size={16} />{t("team.delete")}</button>
+      {onDeleteWithBots && (
+        <button type="button" role="menuitem" className={cn(item, "text-danger [&>svg]:text-danger")} onClick={onDeleteWithBots}>
+          <Trash2 size={16} />Delete team &amp; bots
+        </button>
+      )}
     </>
   );
 }

@@ -969,6 +969,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     setTeamMenu({ name, x: Math.max(8, Math.min(x, window.innerWidth - 266)), y: Math.max(8, Math.min(y, window.innerHeight - 190)) });
   };
   const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
+  const [deletingTeamWithBots, setDeletingTeamWithBots] = useState<string | null>(null);
   const [teamDeletePending, setTeamDeletePending] = useState(false);
   const teamDeleteRunning = useRef(false);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
@@ -1640,6 +1641,9 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             onRename={() => { closeTeamMenu(); (advanced ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
             onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
+            onDeleteWithBots={state.bots.some((bot) => !bot.hidden && !bot.defaultBot && (bot.section?.trim() || "") === teamMotion.value!.name)
+              ? () => { closeTeamMenu(); setDeletingTeamWithBots(teamMotion.value!.name); }
+              : undefined}
             onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
             onSetOwner={teamPeople?.admin ? () => { closeTeamMenu(); pickOwnerOf(state.bots.filter((bot) => !bot.hidden && (bot.section?.trim() || "") === teamMotion.value!.name), teamPeople, teamMotion.value!); } : undefined} onSeeReports={teamPeople ? () => { closeTeamMenu(); showWhoReportsToWhom(dispatch); } : undefined}
           />
@@ -1656,6 +1660,24 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
             .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); setDeletingTeam(null); })
             .catch(cause => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }))
+            .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
+        }} />
+      <ConfirmDialog open={deletingTeamWithBots !== null} title={`Delete ${deletingTeamWithBots ?? ""} & all its bots?`}
+        body="This permanently deletes the department and removes all bots in it from the sidebar. This cannot be undone."
+        confirmLabel="Delete team & bots" returnFocusRef={sidebarRef}
+        pending={teamDeletePending}
+        onCancel={() => { if (!teamDeleteRunning.current) setDeletingTeamWithBots(null); }} onConfirm={() => {
+          const name = deletingTeamWithBots;
+          if (!name || teamDeleteRunning.current) return;
+          teamDeleteRunning.current = true;
+          setTeamDeletePending(true);
+          const targets = state.bots.filter((bot) => !bot.hidden && !bot.defaultBot && (bot.section?.trim() || "") === name);
+          for (const bot of targets) {
+            dispatch({ type: "deleteBot", botId: bot.id });
+          }
+          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+            .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); setDeletingTeamWithBots(null); })
+            .catch(() => { setDeletingTeamWithBots(null); })
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}

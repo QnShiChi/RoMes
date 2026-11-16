@@ -1,18 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { mixCampaignAudio, type BgmTheme } from "./audio-mixer.ts";
 import { legacyScenesToBeatManifest, type CampaignBeatManifest, type NarrativeBeat } from "./beat-schema.ts";
 import { renderBeatMotionVideo } from "./ffmpeg-motion.ts";
 import { generateMarketingSpeech, resolveGeminiApiKey } from "./speech-engine.ts";
-import { type VideoRenderOutput } from "./video-compiler.ts";
+import { renderMarketingVideo, type VideoRenderOutput } from "./video-compiler.ts";
 import { type MarketingSceneSpec, type VideoRatio } from "./video-templates.ts";
+import { computeSentenceSpeechWeight } from "./remotion/subtitles.ts";
 import { ProductImageSearcher } from "./product-images/product-image-searcher.ts";
 import { filterCandidates } from "./product-images/image-quality-filter.ts";
 import { ProductImageDownloader } from "./product-images/product-image-downloader.ts";
+import { ImageReviewer, type ImageReviewResult } from "./product-images/image-reviewer.ts";
+import { AiStudioCdpClient } from "./social-scripts/ai-studio-cdp.ts";
 import type { ProductImageCandidate } from "./product-images/types.ts";
+import { StockVideoSearcher } from "./product-videos/stock-video-searcher.ts";
+import { StockVideoDownloader } from "./product-videos/stock-video-downloader.ts";
 
 export interface ImagePromptSpec {
   prompt: string;
@@ -52,6 +58,9 @@ export interface GenerateImagesOptions {
   maxRetries?: number;
   imageSearcher?: ProductImageSearcher;
   imageDownloader?: ProductImageDownloader;
+  reviewer?: ImageReviewer;
+  targetAspectRatio?: "16:9" | "9:16" | "1:1";
+  preferGeneration?: boolean;
 }
 
 export interface MarketingPostDraft {
@@ -114,6 +123,33 @@ img.save(out, "JPEG", quality=95)
       timeout: 10_000,
       stdio: "ignore",
     });
+    if (existsSync(outputPath)) return true;
+  } catch {
+    // Fall back to ffmpeg if PIL is not installed in the current environment
+  }
+
+  try {
+    const colors = ["0x0f172a", "0x16283c", "0x28143c", "0x0a2d28"];
+    const color = colors[index % colors.length];
+    execFileSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `color=c=${color}:s=${width}x${height}:d=1`,
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        outputPath,
+      ],
+      {
+        timeout: 10_000,
+        stdio: "ignore",
+      },
+    );
     return existsSync(outputPath);
   } catch {
     return false;
@@ -381,6 +417,7 @@ export async function fetchFromUnsplash(
 }
 
 export const GEMINI_IMAGE_MODELS = [
+  "gemini-nano-banana-2.1",
   "gemini-3.1-flash-lite-image",
   "gemini-2.5-flash-image",
   "gemini-3.1-flash-image",
@@ -442,30 +479,57 @@ async function fetchSingleImage(
   spec: ImagePromptSpec,
   index: number,
   campaignDir: string,
-  options: Required<Pick<GenerateImagesOptions, "baseUrl" | "timeoutMs" | "maxRetries">>,
+  options: Required<Pick<GenerateImagesOptions, "baseUrl" | "timeoutMs" | "maxRetries">> & {
+    campaignSlug?: string;
+    reviewer?: ImageReviewer;
+    targetAspectRatio?: "16:9" | "9:16" | "1:1";
+  },
 ): Promise<GeneratedMarketingImage> {
   const width = Math.min(Math.max(spec.width ?? 1080, 256), 2048);
   const height = Math.min(Math.max(spec.height ?? 1920, 256), 2048);
+  const reviewer = options.reviewer ?? new ImageReviewer();
+  const targetRatio = options.targetAspectRatio ?? (height > width ? "9:16" : width > height ? "16:9" : "1:1");
   let lastError = "unknown error";
+  let promptToUse = spec.prompt.trim();
 
   for (let attempt = 0; attempt <= options.maxRetries; attempt += 1) {
     const seed = Math.floor(Math.random() * 1_000_000) + index * 100 + attempt;
+    if (!options.baseUrl.includes("127.0.0.1") && !options.baseUrl.includes("localhost")) {
+      promptToUse = reviewer.refinePrompt(promptToUse, attempt + 1, {
+        topic: options.campaignSlug,
+        targetAspectRatio: targetRatio,
+      });
+    }
     try {
       let buffer: Buffer | null = null;
       let url = "";
 
-      // Tier 1: Try Google AI Studio Image API (if not mock local testing server)
-      if (!options.baseUrl.includes("127.0.0.1") && !options.baseUrl.includes("localhost")) {
+      // Tier 1: Try Google AI Studio Web UI via CDP (using user logged-in Nano Banana 2.1)
+      if (!options.baseUrl?.includes("127.0.0.1") && !options.baseUrl?.includes("localhost")) {
+        try {
+          const cdpClient = new AiStudioCdpClient();
+          const cdpOut = await cdpClient.generateImage(promptToUse, 45_000, targetRatio);
+          if (cdpOut) {
+            buffer = cdpOut.buffer;
+            url = cdpOut.url;
+          }
+        } catch {
+          // Fall through to Tier 2
+        }
+      }
+
+      // Tier 2: Try Google AI Studio Image API (if not mock local testing server)
+      if (!buffer && !options.baseUrl?.includes("127.0.0.1") && !options.baseUrl?.includes("localhost")) {
         const geminiApiKey = resolveGeminiApiKey();
         if (geminiApiKey) {
           try {
-            const geminiOut = await fetchFromGeminiImageApi(spec.prompt.trim(), geminiApiKey, options.timeoutMs);
+            const geminiOut = await fetchFromGeminiImageApi(promptToUse, geminiApiKey, options.timeoutMs);
             if (geminiOut) {
               buffer = geminiOut.buffer;
               url = geminiOut.url;
             }
           } catch {
-            // Fall back to Tier 2 FLUX on quota/API exhaustion
+            // Fall back to Tier 3 FLUX on quota/API exhaustion
           }
         }
       }
@@ -476,7 +540,7 @@ async function fetchSingleImage(
           try {
             const out = await fetchFromGradioFluxSpace(
               options.baseUrl,
-              spec.prompt.trim(),
+              promptToUse,
               width,
               height,
               seed,
@@ -488,7 +552,7 @@ async function fetchSingleImage(
             lastError = gradioErr instanceof Error ? gradioErr.message : String(gradioErr);
           }
         } else {
-          const encoded = encodeURIComponent(spec.prompt.trim());
+          const encoded = encodeURIComponent(promptToUse);
           url = `${options.baseUrl.replace(/\/+$/, "")}/${encoded}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
           const response = await fetch(url, {
             headers: {
@@ -541,10 +605,27 @@ async function fetchSingleImage(
         }
       }
 
+      // Review generated image against standards
+      const review = reviewer.reviewImage({
+        filePath: finalPath,
+        width,
+        height,
+        bytes: buffer.byteLength,
+        prompt: promptToUse,
+        targetAspectRatio: targetRatio,
+      });
+
+      if (!review.passed && attempt < options.maxRetries) {
+        if (review.suggestedPromptRefinement) {
+          promptToUse = review.suggestedPromptRefinement;
+        }
+        continue;
+      }
+
       return {
         index: index + 1,
         label: spec.label?.trim() || `Image ${index + 1}`,
-        prompt: spec.prompt.trim(),
+        prompt: promptToUse,
         filePath: finalPath,
         url,
         mimeType: finalMime,
@@ -563,7 +644,7 @@ async function fetchSingleImage(
     return {
       index: index + 1,
       label: spec.label?.trim() || `Image ${index + 1}`,
-      prompt: spec.prompt.trim(),
+      prompt: promptToUse,
       filePath: fallbackPath,
       url: `local://fallback-${index + 1}.jpg`,
       mimeType: "image/jpeg",
@@ -589,6 +670,46 @@ export function cleanSearchQuery(raw: string, campaignSlug?: string): string {
   return text;
 }
 
+export function resolveSearchQueryForBeat(spec: ImagePromptSpec, campaignSlug?: string): string {
+  const campaignTopic = (campaignSlug || "").replace(/-/g, " ").trim();
+  const rawLabel = (spec.label || "").trim();
+  const rawPrompt = (spec.prompt || "").trim();
+
+  // If label is available, it provides the precise scene context
+  if (rawLabel) {
+    const cleanedLabel = rawLabel
+      .replace(/^(beat|phân cảnh|cảnh|scene)\s*\d+\s*[-–:]*\s*/i, "")
+      .replace(/[;"'[\]{}()]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (cleanedLabel.length >= 3) {
+      const topicTokens = campaignTopic.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+      const matchesTopic = topicTokens.some((t) => cleanedLabel.toLowerCase().includes(t));
+      if (matchesTopic || !campaignTopic) {
+        return cleanedLabel;
+      }
+      return `${cleanedLabel} ${campaignTopic}`;
+    }
+  }
+
+  // If prompt is available, extract keywords or clean up
+  if (rawPrompt) {
+    const extracted = extractKeywordsForSearch(rawPrompt);
+    if (extracted && extracted !== "technology artificial intelligence business") {
+      if (campaignTopic && !extracted.toLowerCase().includes(campaignTopic.toLowerCase())) {
+        return `${extracted} ${campaignTopic}`;
+      }
+      return extracted;
+    }
+    const cleaned = cleanSearchQuery(rawPrompt, campaignSlug);
+    const words = cleaned.split(/\s+/).slice(0, 6).join(" ");
+    if (words) return words;
+  }
+
+  return campaignTopic || "lifestyle";
+}
+
 export async function generateMarketingImages(
   input: GenerateImagesInput,
   options: GenerateImagesOptions,
@@ -598,9 +719,17 @@ export async function generateMarketingImages(
   mkdirSync(campaignDir, { recursive: true });
 
   const prompts = input.prompts;
+  const reviewer = options.reviewer ?? new ImageReviewer();
 
-  if (options.baseUrl) {
-    const baseUrl = options.baseUrl;
+  // If explicit imageSearcher was supplied without preferGeneration, run search mode directly (for tests)
+  const isSearchOnly = options.imageSearcher && !options.preferGeneration && !options.baseUrl;
+
+  if (!isSearchOnly) {
+    const baseUrl =
+      options.baseUrl ||
+      process.env.POLLINATIONS_BASE_URL ||
+      process.env.OMB_POLLINATIONS_BASE_URL ||
+      "https://image.pollinations.ai/prompt";
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
 
@@ -609,7 +738,14 @@ export async function generateMarketingImages(
 
     const settled = await Promise.allSettled(
       prompts.map((spec, idx) =>
-        fetchSingleImage(spec, idx, campaignDir, { baseUrl, timeoutMs, maxRetries }),
+        fetchSingleImage(spec, idx, campaignDir, {
+          baseUrl,
+          timeoutMs,
+          maxRetries,
+          campaignSlug,
+          reviewer,
+          targetAspectRatio: options.targetAspectRatio,
+        }),
       ),
     );
 
@@ -625,53 +761,86 @@ export async function generateMarketingImages(
       }
     });
 
-    return { campaignSlug, campaignDir, images, failed };
+    if (images.length > 0) {
+      return { campaignSlug, campaignDir, images, failed };
+    }
   }
 
   const searcher = options.imageSearcher ?? new ProductImageSearcher();
   const downloader = options.imageDownloader ?? new ProductImageDownloader();
 
   try {
-    let allCandidates: ProductImageCandidate[] = [];
-    const searchedQueries = new Set<string>();
+    const chosenCandidates: ProductImageCandidate[] = [];
+    const usedUrls = new Set<string>();
 
-    for (const p of prompts) {
-      const rawPrompt = p?.prompt?.trim() || "";
-      const cleaned = cleanSearchQuery(rawPrompt, campaignSlug);
-      const query = cleaned || campaignSlug.replace(/-/g, " ");
-      if (query && !searchedQueries.has(query)) {
-        searchedQueries.add(query);
-        const candidates = await searcher.search(query).catch(() => []);
-        allCandidates = allCandidates.concat(candidates);
+    const cleanTopic = campaignSlug.replace(/-/g, " ").replace(/\b(video|campaign|post|ad|remotion)\b/gi, "").trim();
+    const fallbackQuery = cleanTopic || campaignSlug.replace(/-/g, " ").trim();
+    let fallbackPool: ProductImageCandidate[] = [];
+
+    for (let i = 0; i < prompts.length; i++) {
+      const p = prompts[i];
+      const query = resolveSearchQueryForBeat(p, campaignSlug);
+      let candidates = await searcher.search(query).catch(() => []);
+      let validCandidates = filterCandidates(candidates).filter((c) => !usedUrls.has(c.url));
+
+      if (validCandidates.length === 0) {
+        if (fallbackPool.length === 0 && fallbackQuery) {
+          const pool = await searcher.search(fallbackQuery).catch(() => []);
+          fallbackPool = filterCandidates(pool);
+        }
+        validCandidates = fallbackPool.filter((c) => !usedUrls.has(c.url));
+      }
+
+      if (validCandidates.length > 0) {
+        const chosen = validCandidates[0];
+        usedUrls.add(chosen.url);
+        chosenCandidates.push(chosen);
       }
     }
 
-    if (allCandidates.length < prompts.length * 2) {
-      const fallbackQuery = campaignSlug.replace(/-/g, " ");
-      if (!searchedQueries.has(fallbackQuery)) {
-        const fallback = await searcher.search(fallbackQuery).catch(() => []);
-        allCandidates = allCandidates.concat(fallback);
+    // Always provide backup candidates from fallbackPool so that downloader.downloadExact
+    // has a safety cushion to skip any candidate that times out, returns 404, or has corrupt bytes.
+    if (fallbackPool.length === 0 && fallbackQuery) {
+      const pool = await searcher.search(fallbackQuery).catch(() => []);
+      fallbackPool = filterCandidates(pool);
+    }
+    for (const cand of fallbackPool) {
+      if (!usedUrls.has(cand.url)) {
+        usedUrls.add(cand.url);
+        chosenCandidates.push(cand);
       }
     }
 
-    const cleanCandidates = filterCandidates(allCandidates);
     const downloaded = await downloader.downloadExact(
-      cleanCandidates,
+      chosenCandidates,
       campaignDir,
       prompts.length,
     );
 
-    const images: GeneratedMarketingImage[] = downloaded.map((item, idx) => ({
-      index: item.index,
-      label: prompts[idx]?.label?.trim() || item.label,
-      prompt: prompts[idx]?.prompt?.trim() || campaignSlug,
-      filePath: item.filePath,
-      url: item.url,
-      mimeType: item.mimeType,
-      width: item.width,
-      height: item.height,
-      bytes: item.bytes,
-    }));
+    const images: GeneratedMarketingImage[] = downloaded.map((item, idx) => {
+      const spec = prompts[idx];
+      const targetRatio = options.targetAspectRatio ?? (item.height > item.width ? "9:16" : item.width > item.height ? "16:9" : "1:1");
+      const review = reviewer.reviewImage({
+        filePath: item.filePath,
+        width: item.width,
+        height: item.height,
+        bytes: item.bytes,
+        prompt: spec?.prompt?.trim() || campaignSlug,
+        targetAspectRatio: targetRatio,
+      });
+
+      return {
+        index: item.index,
+        label: spec?.label?.trim() || item.label,
+        prompt: review.suggestedPromptRefinement || spec?.prompt?.trim() || campaignSlug,
+        filePath: item.filePath,
+        url: item.url,
+        mimeType: item.mimeType,
+        width: item.width,
+        height: item.height,
+        bytes: item.bytes,
+      };
+    });
 
     return { campaignSlug, campaignDir, images, failed: [] };
   } catch (err) {
@@ -762,6 +931,8 @@ export interface GenerateMarketingVideoInput {
   voice?: string;
   brandName?: string;
   targetDurationSeconds?: number;
+  template?: "default" | "intelligence-commercial" | "kinetic-beat";
+  engine?: "remotion" | "ffmpeg-motion";
 }
 
 export interface GenerateMarketingVideoOutput {
@@ -804,9 +975,15 @@ export function findDiscoveredCampaignImages(assetsRoot: string, preferredSlug?:
         const nameLower = entry.name.toLowerCase();
 
         let score = 0;
+        if (preferredSlug && nameLower === preferredSlug.toLowerCase()) {
+          score += 100;
+        }
         for (const token of slugTokens) {
           if (nameLower.includes(token)) score += 10;
         }
+        // Strict boundary: Only consider folders that match at least one token from the slug
+        if (score === 0) continue;
+
         const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
         if (ageHours < 2) {
           score += 5;
@@ -837,6 +1014,78 @@ export function findDiscoveredCampaignImages(assetsRoot: string, preferredSlug?:
 
         if (imageFiles.length > 0) {
           return imageFiles;
+        }
+      } catch {}
+    }
+  } catch {}
+  return [];
+}
+
+export function findDiscoveredCampaignVideos(assetsRoot: string, preferredSlug?: string): string[] {
+  try {
+    if (!existsSync(assetsRoot)) return [];
+    const entries = readdirSync(assetsRoot, { withFileTypes: true });
+    const slugTokens = (preferredSlug || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 2);
+
+    interface CandidateDir {
+      name: string;
+      fullPath: string;
+      mtime: number;
+      score: number;
+    }
+
+    const candidateDirs: CandidateDir[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const fullPath = join(assetsRoot, entry.name);
+      try {
+        const stat = statSync(fullPath);
+        const nameLower = entry.name.toLowerCase();
+
+        let score = 0;
+        if (preferredSlug && nameLower === preferredSlug.toLowerCase()) {
+          score += 100;
+        }
+        for (const token of slugTokens) {
+          if (nameLower.includes(token)) score += 10;
+        }
+        // Strict boundary: Only consider folders that match at least one token from the slug
+        if (score === 0) continue;
+
+        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours < 2) {
+          score += 5;
+        }
+
+        candidateDirs.push({
+          name: entry.name,
+          fullPath,
+          mtime: stat.mtimeMs,
+          score,
+        });
+      } catch {}
+    }
+
+    candidateDirs.sort((a, b) => b.score - a.score || b.mtime - a.mtime);
+
+    for (const dir of candidateDirs) {
+      try {
+        const files = readdirSync(dir.fullPath);
+        const videoFiles = files
+          .filter((f) => /\.(mp4|webm|mov|mkv)$/i.test(f) && !f.startsWith(".") && !f.includes("-video.mp4") && f !== "video.mp4")
+          .sort((a, b) => {
+            const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+            const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+            return numA - numB || a.localeCompare(b);
+          })
+          .map((f) => join(dir.fullPath, f));
+
+        if (videoFiles.length > 0) {
+          return videoFiles;
         }
       } catch {}
     }
@@ -945,6 +1194,145 @@ export function distributeScriptToScenes(script: string, sceneCount: number): st
   return result;
 }
 
+export function cleanPromptTitle(prompt?: string, highlight?: string): string {
+  if (highlight && highlight.trim() && highlight.length >= 3 && highlight.length <= 40) {
+    const rawHighlight = highlight.includes("|")
+      ? highlight.split("|").slice(1).join(" ").trim() || highlight.trim()
+      : highlight.trim();
+    return rawHighlight.toUpperCase();
+  }
+  if (!prompt || !prompt.trim()) return "";
+  const cleaned = prompt
+    .replace(/^beat\s*\d+[:\s-]*/i, "")
+    .replace(/^(?:Cinematic|Hero shot|Cận cảnh|Góc máy|Hình ảnh|Ảnh|Visual)\s*(?:của|về)?\s*/i, "")
+    .split(/[,.:;\n]/)[0]
+    .trim();
+  if (cleaned.length >= 3 && cleaned.length <= 45) {
+    return cleaned.toUpperCase();
+  }
+  return "";
+}
+
+export function resolveHookTitle(options: {
+  brandName?: string;
+  campaignSlug?: string;
+  topic?: string;
+  firstBeatPrompt?: string;
+}): string {
+  if (options.brandName && options.brandName.trim() && !/^(?:remotion|video|test)/i.test(options.brandName)) {
+    return options.brandName.trim().toUpperCase();
+  }
+  if (options.firstBeatPrompt) {
+    const candidate = cleanPromptTitle(options.firstBeatPrompt);
+    if (candidate) return candidate;
+  }
+  if (options.topic && options.topic.trim()) {
+    const topicClean = options.topic
+      .replace(/^(?:Video\s*(?:thương mại|quảng cáo|remotion|tvc)?\s*(?:cho|về)?\s*)/i, "")
+      .trim();
+    if (topicClean.length >= 3 && topicClean.length <= 40) {
+      return topicClean.toUpperCase();
+    }
+  }
+  const cleanSlug = (options.campaignSlug || "")
+    .replace(/^(?:video-?)?(?:remotion-?)?(?:quang-cao-?)?(?:commercial-?)?/i, "")
+    .replace(/-/g, " ")
+    .trim();
+  return cleanSlug ? cleanSlug.toUpperCase() : "SIÊU PHẨM CÔNG NGHỆ";
+}
+
+export function convertBeatsToScenes(
+  beats: NarrativeBeat[],
+  brandName?: string,
+  campaignSlug?: string,
+  template?: string,
+): MarketingSceneSpec[] {
+  if (!beats || beats.length === 0) return [];
+  const hookTitle = resolveHookTitle({
+    brandName,
+    campaignSlug,
+    firstBeatPrompt: beats[0]?.keywordHighlight || beats[0]?.visualPrompt || beats[0]?.narration,
+  });
+  const firstBeatTitle = cleanPromptTitle(beats[0]?.visualPrompt, beats[0]?.keywordHighlight) || hookTitle;
+
+  const bodyRotation: Array<MarketingSceneSpec["type"]> = [
+    "product",
+    "features",
+    "split",
+    "quote",
+    "solution",
+  ];
+
+  let prevType: MarketingSceneSpec["type"] = "hook";
+  return beats.map((b, idx) => {
+    const isFirst = idx === 0;
+    const isLast = idx === beats.length - 1;
+    let type: MarketingSceneSpec["type"] = "features";
+
+    if (isFirst) {
+      type = "hook";
+    } else if (isLast) {
+      type = "cta";
+    } else {
+      const text = `${b.visualPrompt || ""} ${b.narration || ""}`.toLowerCase();
+      const hasNumericStat = /\b\d+(?:[.,]\d+)?\s*(?:%|x|sao|★|k\b|ngàn|triệu|giờ|ngày|năm)/i.test(
+        `${b.keywordHighlight || ""} ${b.narration || ""}`,
+      );
+      if (hasNumericStat) {
+        type = "stats";
+      } else {
+        type = bodyRotation[(idx - 1) % bodyRotation.length]!;
+        if (type === prevType) {
+          type = bodyRotation[idx % bodyRotation.length]!;
+        }
+      }
+      if (/so với|khác biệt|thay vì|trước và sau/.test(text) && prevType !== "split") {
+        type = "split";
+      }
+    }
+    prevType = type;
+
+    let title = "";
+    if (isFirst) {
+      title = firstBeatTitle;
+    } else if (isLast) {
+      title = b.keywordHighlight && b.keywordHighlight.length < 35
+        ? b.keywordHighlight.toUpperCase()
+        : "ĐẶT HÀNG NGAY HÔM NAY";
+    } else {
+      title = cleanPromptTitle(b.visualPrompt, b.keywordHighlight) || `ĐIỂM NHẤN ${idx + 1}`;
+    }
+
+    const narration = (b.narration || "").trim();
+    const kh = (b.keywordHighlight || "").trim();
+    const isDuplicateTitle = kh.toUpperCase() === title.trim().toUpperCase();
+    const bulletPoints = (kh.length >= 3 && (!isDuplicateTitle || type === "stats"))
+      ? [kh]
+      : undefined;
+
+    return {
+      type,
+      title,
+      subtitle: narration,
+      subtitles: narration ? [narration] : undefined,
+      bulletPoints,
+      imagePath: b.imagePath,
+      videoPath: b.videoPath,
+      durationMs: b.durationEstimateMs || 4000,
+    };
+  });
+}
+
+export async function generateIntelligenceCommercialWorkflow(
+  assetsRoot: string,
+  input: GenerateMarketingVideoInput,
+): Promise<GenerateMarketingVideoOutput> {
+  return generateMarketingVideoWorkflow(assetsRoot, {
+    ...input,
+    template: "intelligence-commercial",
+  });
+}
+
 export async function generateMarketingVideoWorkflow(
   assetsRoot: string,
   input: GenerateMarketingVideoInput,
@@ -955,12 +1343,114 @@ export async function generateMarketingVideoWorkflow(
 
   const ratio = input.ratio || "9:16";
   const bgmTheme = input.bgmTheme || "tech";
-  const rawScenes = Array.isArray(input.scenes) && input.scenes.length > 0 ? input.scenes : [
-    { type: "hook" as const, title: campaignSlug.replace(/-/g, " ").toUpperCase(), durationMs: 4000 },
-    { type: "features" as const, title: "Tính năng nổi bật", bulletPoints: ["Tối ưu hiệu suất vượt trội", "Tự động hóa thông minh"], durationMs: 5000 },
-    { type: "product" as const, title: "Giải pháp toàn diện", subtitle: "Hiện đại hóa quy trình làm việc", durationMs: 5000 },
-    { type: "cta" as const, title: "Bắt đầu ngay hôm nay", subtitle: "Khám phá ngay", durationMs: 4000 },
-  ];
+
+  // Construct rawScenes: prefer explicit scenes -> convert from beats -> dynamic default
+  let rawScenes: MarketingSceneSpec[];
+  if (Array.isArray(input.scenes) && input.scenes.length > 0) {
+    rawScenes = input.scenes.map((s, idx) => {
+      if (idx === 0 && (!s.title || s.title.includes(campaignSlug) || /^(?:video-?remotion|test)/i.test(s.title))) {
+        return {
+          ...s,
+          title: resolveHookTitle({ brandName: input.brandName, campaignSlug, firstBeatPrompt: s.subtitle }),
+        };
+      }
+      return s;
+    });
+  } else if (Array.isArray(input.beats) && input.beats.length > 0) {
+    rawScenes = convertBeatsToScenes(input.beats, input.brandName, campaignSlug, input.template);
+  } else {
+    const hookTitle = resolveHookTitle({ brandName: input.brandName, campaignSlug });
+    const bName = (input.brandName || "SIÊU PHẨM").trim().toUpperCase();
+
+    let candidateImages: string[] = [];
+    try {
+      if (existsSync(campaignDir)) {
+        candidateImages = readdirSync(campaignDir)
+          .filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f) && !f.startsWith("."))
+          .sort((a, b) => {
+            const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+            const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+            return numA - numB || a.localeCompare(b);
+          });
+      }
+    } catch {}
+
+    const targetSec = input.targetDurationSeconds && input.targetDurationSeconds > 0
+      ? input.targetDurationSeconds
+      : 30;
+    const targetCount = candidateImages.length > 0
+      ? candidateImages.length
+      : Math.max(3, Math.round(targetSec / 3));
+
+    if (targetCount <= 5) {
+      rawScenes = [
+        {
+          type: "hook" as const,
+          title: hookTitle,
+          subtitle: "Đỉnh cao thiết kế & Trải nghiệm vượt trội",
+          floatingTags: ["CHÍNH HÃNG", "THIẾT KẾ ĐỘT PHÁ"],
+          durationMs: 4000,
+        },
+        {
+          type: "product" as const,
+          title: "Hoàn Thiện Tinh Xảo Từng Chi Tiết",
+          subtitle: "Chất liệu cao cấp & Gia công chuẩn xác",
+          floatingTags: ["GIA CÔNG CAO CẤP"],
+          durationMs: 5000,
+        },
+        {
+          type: "features" as const,
+          title: `${bName} – Tính Năng Nổi Bật`,
+          bulletPoints: ["⚡ Hiệu năng vượt trội & Phản hồi tức thì", "🛠️ Linh hoạt tùy biến theo phong cách", "💎 Độ bền bỉ cao cấp theo thời gian"],
+          durationMs: 5000,
+        },
+        {
+          type: "stats" as const,
+          title: "Được Tin Dùng Hàng Đầu",
+          bulletPoints: ["4.9 ★ Đánh giá xuất sắc", "98% Khách hàng hài lòng"],
+          durationMs: 5000,
+        },
+        {
+          type: "cta" as const,
+          title: `Sở Hữu ${bName} Ngay Hôm Nay`,
+          subtitle: "Khám phá ngay để nhận ưu đãi đặc biệt",
+          floatingTags: ["MIỄN PHÍ VẬN CHUYỂN", "BẢO HÀNH UY TÍN"],
+          durationMs: 4000,
+        },
+      ].slice(0, targetCount);
+    } else {
+      const sceneDurationMs = Math.max(2500, Math.round((targetSec * 1000) / targetCount));
+      const bodyTypes: Array<MarketingSceneSpec["type"]> = ["product", "features", "split", "quote", "solution", "stats"];
+      rawScenes = Array.from({ length: targetCount }, (_, idx) => {
+        if (idx === 0) {
+          return {
+            type: "hook" as const,
+            title: hookTitle,
+            subtitle: "Đỉnh cao thiết kế & Trải nghiệm vượt trội",
+            floatingTags: ["CHÍNH HÃNG", "THIẾT KẾ ĐỘT PHÁ"],
+            durationMs: sceneDurationMs,
+          };
+        }
+        if (idx === targetCount - 1) {
+          return {
+            type: "cta" as const,
+            title: `Sở Hữu ${bName} Ngay Hôm Nay`,
+            subtitle: "Khám phá ngay để nhận ưu đãi đặc biệt",
+            floatingTags: ["MIỄN PHÍ VẬN CHUYỂN", "BẢO HÀNH UY TÍN"],
+            durationMs: sceneDurationMs,
+          };
+        }
+        const bodyType = bodyTypes[(idx - 1) % bodyTypes.length]!;
+        return {
+          type: bodyType,
+          title: `${bName} – Điểm Nhấn ${idx + 1}`,
+          subtitle: `Trải nghiệm đẳng cấp cùng ${bName}`,
+          bulletPoints: bodyType === "stats" ? ["4.9 ★ Đánh giá xuất sắc", "98% Khách hàng hài lòng"] : undefined,
+          durationMs: sceneDurationMs,
+        };
+      });
+    }
+  }
 
   const requestedDurationMs = input.targetDurationSeconds && input.targetDurationSeconds > 0
     ? Math.round(input.targetDurationSeconds * 1000)
@@ -968,18 +1458,32 @@ export async function generateMarketingVideoWorkflow(
   const rawSceneDuration = rawScenes.reduce((acc, s) => acc + (s.durationMs || 3000), 0);
   const desiredDurationMs = Math.max(requestedDurationMs, rawSceneDuration);
 
-  const sanitizedScript = sanitizeVoiceoverScript(input.script || "", rawScenes);
-  const cleanedScript = enrichScriptForDuration(
-    sanitizedScript,
-    rawScenes,
-    desiredDurationMs / 1000,
-  );
+  const defaultCommercialScript =
+    `Khám phá ngay ${input.brandName || "sản phẩm"} – sự kết hợp hoàn hảo giữa thiết kế tinh xảo và hiệu năng vượt trội. Được chế tác tỉ mỉ từ chất liệu cao cấp, mang lại trải nghiệm mượt mà và đẳng cấp khác biệt. Được hàng ngàn khách hàng tin tưởng đánh giá 5 sao. Đặt hàng ngay hôm nay để nhận ưu đãi đặc biệt!`;
+
+  let scriptToSynthesize = "";
+  if (Array.isArray(input.beats) && input.beats.length > 0) {
+    scriptToSynthesize = input.beats
+      .map((b) => (b.narration || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (!scriptToSynthesize) {
+    const sanitizedScript = sanitizeVoiceoverScript(input.script || "", rawScenes);
+    scriptToSynthesize = sanitizedScript.trim() || defaultCommercialScript;
+  }
+
+  const detectedSpeechLanguage =
+    /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(scriptToSynthesize)
+      ? "vi"
+      : "en";
 
   const speechOutput = await generateMarketingSpeech({
-    script: cleanedScript || input.script || "Trải nghiệm sức mạnh công nghệ AI đột phá ngay hôm nay.",
+    script: scriptToSynthesize,
     campaignSlug,
     outputDir: campaignDir,
     voice: input.voice,
+    language: detectedSpeechLanguage,
   });
 
   const mixedAudioPath = join(campaignDir, `${campaignSlug}-audio.mp3`);
@@ -987,16 +1491,100 @@ export async function generateMarketingVideoWorkflow(
     voicePath: speechOutput.audioPath,
     bgmTheme,
     outputPath: mixedAudioPath,
-    targetDurationMs: desiredDurationMs > speechOutput.durationMs ? desiredDurationMs : undefined,
+    targetDurationMs: undefined,
   });
 
-  const totalAudioMs = Math.max(mixedAudio.durationMs, speechOutput.durationMs, desiredDurationMs, 1000);
-  const scaleFactor = rawSceneDuration > 0 ? totalAudioMs / rawSceneDuration : 1;
+  const spokenAudioMs = Math.max(speechOutput.durationMs, 1000);
+  const totalAudioMs = Math.max(mixedAudio.durationMs, spokenAudioMs, 1000);
 
-  const discoveredImages = findDiscoveredCampaignImages(assetsRoot, campaignSlug);
-  const distributedSubtitles = distributeScriptToScenes(cleanedScript, rawScenes.length);
+  // Check campaign-local assets first
+  let localImages: string[] = [];
+  let localVideos: string[] = [];
+  try {
+    if (existsSync(campaignDir)) {
+      const files = readdirSync(campaignDir);
+      localImages = files
+        .filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f) && !f.startsWith("."))
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+          const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+          return numA - numB || a.localeCompare(b);
+        })
+        .map((f) => join(campaignDir, f));
+      localVideos = files
+        .filter((f) => /\.(mp4|webm|mov|mkv)$/i.test(f) && !f.startsWith(".") && !f.includes("-video.mp4") && f !== "video.mp4")
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/\D/g, ""), 10) || 0;
+          const numB = parseInt(b.replace(/\D/g, ""), 10) || 0;
+          return numA - numB || a.localeCompare(b);
+        })
+        .map((f) => join(campaignDir, f));
+    }
+  } catch {}
+
+  let discoveredVideos = localVideos.length > 0 ? localVideos : findDiscoveredCampaignVideos(assetsRoot, campaignSlug);
+  let discoveredImages = localImages.length > 0 ? localImages : findDiscoveredCampaignImages(assetsRoot, campaignSlug);
+
+  // If local campaign images exist but no local videos exist, strictly prefer the campaign's own
+  // local images instead of borrowing unrelated external videos!
+  if (localVideos.length === 0 && localImages.length > 0) {
+    discoveredVideos = [];
+  }
+
+  // If no visual assets exist in campaign or discovery, search and download stock videos dynamically
+  if (discoveredVideos.length === 0 && discoveredImages.length === 0) {
+    try {
+      const searcher = new StockVideoSearcher();
+      const downloader = new StockVideoDownloader();
+      const searchQuery = input.brandName || campaignSlug.replace(/-/g, " ");
+      const candidates = await searcher.search(searchQuery, { limit: 6 });
+      if (candidates.length > 0) {
+        await downloader.downloadExact(candidates, campaignDir, Math.min(candidates.length, 4));
+        discoveredVideos = findDiscoveredCampaignVideos(assetsRoot, campaignSlug);
+      }
+    } catch {
+      // Graceful fallback
+    }
+  }
+
+  const distributedSubtitles = distributeScriptToScenes(scriptToSynthesize, rawScenes.length);
+
+  // Synchronize scene durations with narration speech weights so speech, subtitles, and images stay locked together!
+  const beatWords = rawScenes.map((s, idx) => {
+    let text = "";
+    if (Array.isArray(input.beats) && input.beats[idx]?.narration) {
+      text = input.beats[idx]!.narration.trim();
+    } else {
+      text = (distributedSubtitles[idx] || s.subtitles?.[0] || s.subtitle || s.title || "").trim();
+    }
+    return computeSentenceSpeechWeight(text);
+  });
+  const totalBeatWords = beatWords.reduce((a, b) => a + b, 0);
 
   const adjustedScenes = rawScenes.map((s, idx) => {
+    let videoPath = (s as any).videoPath;
+    if (!videoPath || !existsSync(videoPath)) {
+      const videoCandidates = [
+        join(campaignDir, `video-${idx + 1}.mp4`),
+        join(campaignDir, `video-${idx + 1}.webm`),
+        join(campaignDir, "video-1.mp4"),
+      ];
+      for (const cand of videoCandidates) {
+        if (existsSync(cand) && statSync(cand).size > 1000) {
+          videoPath = cand;
+          break;
+        }
+      }
+    }
+    if (!videoPath || !existsSync(videoPath)) {
+      if (discoveredVideos.length > 0) {
+        const discovered = discoveredVideos[idx % discoveredVideos.length];
+        if (discovered && existsSync(discovered)) {
+          videoPath = discovered;
+        }
+      }
+    }
+
     let imgPath = s.imagePath;
     if (!imgPath || !existsSync(imgPath)) {
       const candidates = [
@@ -1030,18 +1618,21 @@ export async function generateMarketingVideoWorkflow(
       }
     }
 
-    const spokenSegment = distributedSubtitles[idx];
-    const subtitles = Array.isArray(s.subtitles) && s.subtitles.length > 0
-      ? s.subtitles
-      : spokenSegment
-      ? [spokenSegment]
-      : undefined;
+    const spokenSegment = (Array.isArray(input.beats) && input.beats[idx]?.narration)
+      ? input.beats[idx]!.narration.trim()
+      : (distributedSubtitles[idx] || s.subtitles?.[0] || s.subtitle || "").trim();
+    const subtitles = spokenSegment ? [spokenSegment] : undefined;
+
+    // Allocate duration in exact proportion to the spoken words of this scene so speech and visual are locked
+    const wordRatio = totalBeatWords > 0 ? beatWords[idx]! / totalBeatWords : 1 / rawScenes.length;
+    const computedDurationMs = Math.max(1000, Math.round(totalAudioMs * wordRatio));
 
     return {
       ...s,
       imagePath: imgPath,
+      videoPath,
       subtitles,
-      durationMs: Math.max(500, Math.round((s.durationMs || 3000) * scaleFactor)),
+      durationMs: computedDurationMs,
     };
   });
 
@@ -1055,36 +1646,57 @@ export async function generateMarketingVideoWorkflow(
         campaignSlug,
         targetDurationSeconds: requestedDurationMs > 0 ? Math.round(requestedDurationMs / 1000) : Math.round(totalAudioMs / 1000),
         styleTheme: "retro_tech_newspaper",
-        beats: input.beats.map((b, idx) => ({
-          ...b,
-          beatIndex: idx + 1,
-          visualPrompt: b.visualPrompt || b.narration || `Beat ${idx + 1}`,
-          cameraMotion: b.cameraMotion || "slow_zoom_in",
-          durationEstimateMs: Number.isFinite(b.durationEstimateMs) && Number(b.durationEstimateMs) > 0
-            ? Number(b.durationEstimateMs)
-            : defaultBeatEstimateMs,
-          imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
-        })),
+        beats: input.beats.map((b, idx) => {
+          let videoP = b.videoPath && existsSync(b.videoPath) ? b.videoPath : undefined;
+          if (!videoP && discoveredVideos.length > 0) {
+            videoP = discoveredVideos[idx % discoveredVideos.length];
+          }
+          return {
+            ...b,
+            beatIndex: idx + 1,
+            narration: b.narration || distributedSubtitles[idx] || "",
+            visualPrompt: b.visualPrompt || b.narration || `Beat ${idx + 1}`,
+            cameraMotion: b.cameraMotion || "slow_zoom_in",
+            durationEstimateMs: Number.isFinite(b.durationEstimateMs) && Number(b.durationEstimateMs) > 0
+              ? Number(b.durationEstimateMs)
+              : defaultBeatEstimateMs,
+            imagePath: b.imagePath && existsSync(b.imagePath) ? b.imagePath : adjustedScenes[idx % adjustedScenes.length]?.imagePath,
+            videoPath: videoP,
+          };
+        }),
       }
-    : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, cleanedScript);
+    : legacyScenesToBeatManifest(campaignSlug, adjustedScenes, scriptToSynthesize);
 
-  const motionResult = await renderBeatMotionVideo({
-    manifest: beatManifest,
-    audioPath: mixedAudio.mixedAudioPath,
-    outputPath: videoOutputPath,
-    fps: 30,
-    width: ratio === "16:9" ? 1920 : 1080,
-    height: ratio === "16:9" ? 1080 : 1920,
-  });
-
-  const renderOutput: VideoRenderOutput = {
-    videoPath: motionResult.videoPath,
-    width: motionResult.width,
-    height: motionResult.height,
-    durationSeconds: motionResult.durationSeconds,
-    bytes: motionResult.bytes,
-    fps: 30,
-  };
+  let renderOutput: VideoRenderOutput;
+  try {
+    renderOutput = await renderMarketingVideo({
+      campaignSlug,
+      scenes: adjustedScenes,
+      audioPath: mixedAudio.mixedAudioPath,
+      ratio,
+      outputPath: videoOutputPath,
+      brandName: input.brandName || campaignSlug.replace(/-/g, " "),
+      fps: 30,
+    });
+  } catch (remotionErr) {
+    console.warn("[generateMarketingVideoWorkflow] Remotion render failed, fallback to beat motion:", remotionErr);
+    const motionResult = await renderBeatMotionVideo({
+      manifest: beatManifest,
+      audioPath: mixedAudio.mixedAudioPath,
+      outputPath: videoOutputPath,
+      fps: 30,
+      width: ratio === "16:9" ? 1920 : 1080,
+      height: ratio === "16:9" ? 1080 : 1920,
+    });
+    renderOutput = {
+      videoPath: motionResult.videoPath,
+      width: motionResult.width,
+      height: motionResult.height,
+      durationSeconds: motionResult.durationSeconds,
+      bytes: motionResult.bytes,
+      fps: 30,
+    };
+  }
 
   const narrationSeconds = Math.round(speechOutput.durationMs / 100) / 10;
   const narrationGap = requestedDurationMs > 0 && speechOutput.durationMs < requestedDurationMs * 0.9

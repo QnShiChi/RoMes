@@ -1,0 +1,15 @@
+.git
+node_modules
+electron
+companion
+evals
+scripts
+docs
+apps/docs
+server
+.openmausbot
+.omb-scratch
+dist-electron
+dist-companion
+dist-server
+release

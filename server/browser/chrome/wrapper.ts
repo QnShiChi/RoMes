@@ -38,6 +38,10 @@ export const LAUNCHER_SECCOMP_FD = 9;
  * Chrome never touches the person's keychain or keyring (agent-browser 0.37 passes these too). */
 export function launcherFlags(settings: LauncherSettings, platform: NodeJS.Platform = process.platform): string[] {
   return [
+    "--no-sandbox",
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--enable-zero-copy",
     "--disable-blink-features=AutomationControlled",
     `--user-agent=${settings.userAgent}`,
     `--screen-info={${settings.screen.width}x${settings.screen.height}}`,

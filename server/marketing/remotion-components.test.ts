@@ -55,9 +55,23 @@ describe("remotion-components", () => {
     expect(layouts).toEqual(["problem", "stats", "quote"]);
   });
 
+  it("resolves intelligence commercial layouts (telemetry, swarm, chart, outro)", () => {
+    const commercialScenes: MarketingSceneSpec[] = [
+      { type: "telemetry", title: "Khủng hoảng Ngân sách" },
+      { type: "telemetry", title: "Thị trường Biến động" },
+      { type: "swarm", title: "RoMes Swarm AI" },
+      { type: "chart", title: "Tăng trưởng Doanh thu" },
+      { type: "outro", title: "Quyết định Thông minh" },
+    ];
+    const layouts = resolveSceneLayouts(commercialScenes);
+    expect(layouts).toEqual(["telemetry", "telemetry", "swarm", "chart", "outro"]);
+  });
+
   it("reads numbers, units and labels from stat bullets", () => {
     expect(parseStat("10x | Năng suất")).toEqual({ value: 10, prefix: "", suffix: "x", label: "Năng suất" });
     expect(parseStat("Giảm 40% chi phí")).toEqual({ value: 40, prefix: "Giảm", suffix: "%", label: "chi phí" });
+    expect(parseStat("$113,500 | AD WASTE")).toEqual({ value: 113500, prefix: "$", suffix: "", label: "AD WASTE" });
+    expect(parseStat("4.8x | Blended ROAS")).toEqual({ value: 4.8, prefix: "", suffix: "x", label: "Blended ROAS" });
     expect(parseStat("Không có số")).toBeNull();
   });
 });

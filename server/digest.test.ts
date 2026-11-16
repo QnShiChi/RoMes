@@ -124,6 +124,15 @@ describe("buildTurnDigest", () => {
     expect(long.reply).toHaveLength(200);
   });
 
+  it("does not split surrogate pairs when truncating reply at 200 characters", () => {
+    const prefix = "a".repeat(199);
+    const emoji = "🎯";
+    const d = buildTurnDigest({ ...base, activities: [], memory: [], reply: `${prefix}${emoji} more text.` });
+    expect(d.reply).toHaveLength(199);
+    expect(d.reply).toBe(prefix);
+    expect(d.reply.isWellFormed()).toBe(true);
+  });
+
   it("masks a credential the reply repeats, as the stored reply is masked", () => {
     const secret = `${"whsec" + "_"}${"a1B2c3D4".repeat(5)}`;
     const d = buildTurnDigest({ ...base, activities: [], memory: [], reply: `Connected the watcher to http://127.0.0.1:8800/hooks/wh_abc/${secret}. Done.` });

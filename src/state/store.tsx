@@ -913,7 +913,12 @@ export function reducer(state: AppState, action: Action): AppState {
       const resume = action.resumeId;
       const resumed =
         resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
+      const defaultBot =
+        action.bots.find((b) => !b.hidden && b.name.trim().toLowerCase() === "romes") ??
+        action.bots.find((b) => !b.hidden && b.chiefOfStaff) ??
+        action.bots.find((b) => !b.hidden) ??
+        action.bots[0];
+      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (defaultBot?.id ?? "");
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {
@@ -1066,7 +1071,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
-      const selectedId = state.selectedId === action.groupId ? (state.bots[0]?.id ?? "") : state.selectedId;
+      const fallbackBot =
+        state.bots.find((b) => !b.hidden && b.name.trim().toLowerCase() === "romes") ??
+        state.bots.find((b) => !b.hidden && b.chiefOfStaff) ??
+        state.bots[0];
+      const selectedId = state.selectedId === action.groupId ? (fallbackBot?.id ?? "") : state.selectedId;
       return { ...state, groups, selectedId };
     }
     case "instances":

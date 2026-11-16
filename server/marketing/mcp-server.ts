@@ -16,6 +16,7 @@ import {
   type MarketingPostInput,
 } from "./social-post-artifact.ts";
 import {
+  generateIntelligenceCommercialWorkflow,
   generateMarketingImages,
   generateMarketingVideoWorkflow,
   getMarketingDraft,
@@ -24,6 +25,9 @@ import {
   type ImagePromptSpec,
   type MarketingPostDraft,
 } from "./studio.ts";
+import { ImageReviewer } from "./product-images/image-reviewer.ts";
+import { AiStudioGenerator } from "./social-scripts/ai-studio-generator.ts";
+import { AiStudioCdpClient } from "./social-scripts/ai-studio-cdp.ts";
 
 const ASSETS_ROOT =
   process.env.MARKETING_ASSETS_ROOT?.trim() ||
@@ -173,7 +177,7 @@ const TOOLS = [
   {
     name: "generate_marketing_images",
     description:
-      "Search for 1 to 12 relevant real marketing images, validate and save them locally for chat preview and social upload.",
+      "Search for 1 to 30 relevant real marketing images, validate and save them locally for chat preview and social upload.",
     inputSchema: {
       type: "object",
       properties: {
@@ -183,7 +187,7 @@ const TOOLS = [
         },
         prompts: {
           type: "array",
-          description: "List of 1 to 12 precise English search descriptions corresponding to the persisted visual directions.",
+          description: "List of 1 to 30 precise English search descriptions corresponding to the persisted visual directions.",
           items: {
             type: "object",
             properties: {
@@ -200,6 +204,10 @@ const TOOLS = [
             },
             required: ["prompt"],
           },
+        },
+        forceRefresh: {
+          type: "boolean",
+          description: "Bypass cached image artifacts and force regeneration using Google AI Studio.",
         },
       },
       required: ["campaignId", "prompts"],
@@ -226,7 +234,7 @@ const TOOLS = [
         },
         beats: {
           type: "array",
-          description: "List of 8 to 12 narrative beats (3 to 5 seconds each) with voiceover narration, visualPrompt, and cameraMotion.",
+          description: "List of narrative beats (~3 seconds each, e.g. 10 beats for 30s) with voiceover narration, visualPrompt, and cameraMotion.",
           items: {
             type: "object",
             properties: {
@@ -287,8 +295,56 @@ const TOOLS = [
           description:
             "Video length the user asked for, in seconds. The video is never shorter than this; write about 2.3 Vietnamese words per second of script to fill it with narration.",
         },
+        template: {
+          type: "string",
+          enum: ["default", "intelligence-commercial"],
+          description:
+            "Video template format. Use 'intelligence-commercial' for the 60s Swarm AI commercial combining real-life footage with Swarm Topology, Spline Revenue Charts, and Telemetry Alerts.",
+        },
       },
       required: ["campaignId", "campaignSlug", "script"],
+    },
+  },
+  {
+    name: "generate_intelligence_commercial",
+    description:
+      "Generate an Intelligence Decision TVC commercial (30s to 60s) combining real-life footage with Remotion motion graphics (Swarm AI Topology, Spline Revenue Curves, and Telemetry Alerts HUD). Designed specifically for Hackathon track: Marketing & Sales + Intelligence Decision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: {
+          type: "string",
+          description: "Approved campaign slug ID whose assets are ready.",
+        },
+        campaignSlug: {
+          type: "string",
+          description: "Short slug for the campaign.",
+        },
+        script: {
+          type: "string",
+          description: "Full voiceover narration script for Google AI Studio Speech synthesis.",
+        },
+        ratio: {
+          type: "string",
+          enum: ["9:16", "16:9"],
+          description: "Video aspect ratio (default '9:16').",
+        },
+        bgmTheme: {
+          type: "string",
+          enum: ["tech", "upbeat", "chill", "luxury"],
+          description: "BGM music vibe (default 'tech').",
+        },
+        voice: {
+          type: "string",
+          description: "Google AI Studio voice name (e.g. 'Puck', 'Charon', 'Aoede').",
+        },
+        brandName: { type: "string", description: "Brand name watermark/badge (default 'RoMes AI')." },
+        targetDurationSeconds: {
+          type: "number",
+          description: "Video length in seconds (default 60).",
+        },
+      },
+      required: ["campaignId"],
     },
   },
   {
@@ -362,6 +418,67 @@ const TOOLS = [
         campaignSlug: { type: "string" },
       },
       required: ["campaignSlug"],
+    },
+  },
+  {
+    name: "review_marketing_image",
+    description:
+      "Review an image file against commercial quality standards (resolution, file size, aspect ratio, prompt alignment) and return an assessment score, failure reasons, and prompt refinement suggestions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: { type: "string", description: "Absolute path to the image file to review." },
+        prompt: { type: "string", description: "Original visual prompt intended for the image." },
+        targetAspectRatio: {
+          type: "string",
+          enum: ["16:9", "9:16", "1:1"],
+          description: "Expected aspect ratio ('9:16' for vertical shorts/reels, '16:9' for landscape, '1:1' for square).",
+        },
+        minBytes: { type: "number", description: "Minimum acceptable file size in bytes (default 35,000)." },
+        minWidth: { type: "number", description: "Minimum acceptable width in pixels (default 600)." },
+        minHeight: { type: "number", description: "Minimum acceptable height in pixels (default 400)." },
+      },
+      required: ["filePath", "prompt"],
+    },
+  },
+  {
+    name: "refine_image_prompt",
+    description:
+      "Standardize and enrich an image prompt into a 5-layer commercial studio prompt (Subject/Materials, Real-world Context, Hasselblad cinematography/lighting, Aspect Ratio, Negative Exclusions) with retry adaptation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Original concept or draft prompt." },
+        attempt: { type: "number", description: "Generation attempt count (1 for initial, >1 on retry/re-roll)." },
+        topic: { type: "string", description: "Campaign topic or product name for contextual tuning." },
+        targetAspectRatio: {
+          type: "string",
+          enum: ["16:9", "9:16", "1:1"],
+          description: "Expected aspect ratio tag.",
+        },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "submit_ai_studio_prompt",
+    description:
+      "Submit a standardized commercial prompt directly to the open Google AI Studio session in the active browser (Brave/Chrome) to generate high-precision image assets matching the storyline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Detailed 5-layer commercial prompt to submit to Google AI Studio." },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "open_ai_studio_login",
+    description:
+      "Launch the project's dedicated Chrome browser headed to https://aistudio.google.com/ so the user can complete Google sign-in once for automated image generation.",
+    inputSchema: {
+      type: "object",
+      properties: {},
     },
   },
 ];
@@ -618,16 +735,21 @@ async function handleCall(name: string, args: Record<string, unknown>) {
       }
     }
     if (prompts.length === 0) {
-      const count = campaign.brief.imageCount || 3;
+      const isVideo = campaign.brief.contentType === "video_campaign";
+      const defaultCount = isVideo
+        ? Math.max(3, Math.round((campaign.brief.targetDurationSeconds || 30) / 3))
+        : 3;
+      const count = campaign.brief.imageCount || defaultCount;
       prompts = Array.from({ length: count }, (_, i) => ({
-        prompt: `Commercial realistic professional photo representing ${campaign.brief.topic}, high detail, 8k, aspect ratio 1:1, angle ${i + 1}`,
+        prompt: `Commercial realistic professional photo representing ${campaign.brief.topic}, high detail, 8k, aspect ratio ${isVideo ? "9:16" : "1:1"}, angle ${i + 1}`,
         label: `Image ${i + 1}`,
       }));
     }
+    const forceRefresh = Boolean(args.forceRefresh);
     const batchKey = `images:${createHash("sha256").update(JSON.stringify(prompts)).digest("hex")}`;
     const current = CAMPAIGNS.get(campaign.id);
     const reusable = current.artifacts.filter((artifact) => artifact.type === "image" && artifact.operationKey.startsWith(`${batchKey}:`) && existsSync(artifact.path));
-    if (reusable.length === prompts.length) {
+    if (!forceRefresh && reusable.length === prompts.length) {
       const curStatus = CAMPAIGNS.get(campaign.id).status;
       if (curStatus === "scripting" || curStatus === "approved") {
         CAMPAIGNS.transition(campaign.id, "assets_ready");
@@ -659,7 +781,12 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     if (campaign.status === "approved") CAMPAIGNS.transition(campaign.id, "scripting");
     const output = await generateMarketingImages(
       { campaignSlug: campaign.slug, prompts },
-      { assetsRoot: ASSETS_ROOT, ...(BASE_URL ? { baseUrl: BASE_URL } : {}) },
+      {
+        assetsRoot: ASSETS_ROOT,
+        preferGeneration: true,
+        targetAspectRatio: campaign.brief.contentType === "video_campaign" ? "9:16" : "1:1",
+        ...(BASE_URL ? { baseUrl: BASE_URL } : {}),
+      },
     );
     if (output.images.length === 0) {
       CAMPAIGNS.failOperation(campaign.id, batchKey);
@@ -729,6 +856,34 @@ async function handleCall(name: string, args: Record<string, unknown>) {
       campaignId,
       input,
       (renderInput) => generateMarketingVideoWorkflow(ASSETS_ROOT, renderInput),
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(output, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (name === "generate_intelligence_commercial") {
+    const rawId = String(args.campaignId ?? "").trim();
+    const campaignId = resolveCampaignId(ASSETS_ROOT, rawId);
+    const campaign = CAMPAIGNS.get(campaignId);
+    const targetDurationSeconds = Number(args.targetDurationSeconds) || 60;
+    const input = {
+      ...(args as unknown as GenerateMarketingVideoInput),
+      campaignId,
+      campaignSlug: campaign.slug,
+      targetDurationSeconds,
+      template: "intelligence-commercial" as const,
+    };
+    const output = await renderApprovedCampaign(
+      CAMPAIGNS,
+      campaignId,
+      input,
+      (renderInput) => generateIntelligenceCommercialWorkflow(ASSETS_ROOT, renderInput),
     );
     return {
       content: [
@@ -846,6 +1001,63 @@ async function handleCall(name: string, args: Record<string, unknown>) {
     const draft = await getMarketingDraft(ASSETS_ROOT, campaignSlug);
     return {
       content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
+    };
+  }
+
+  if (name === "review_marketing_image") {
+    const reviewer = new ImageReviewer();
+    const result = reviewer.reviewImage({
+      filePath: String(args.filePath ?? ""),
+      prompt: String(args.prompt ?? ""),
+      targetAspectRatio: args.targetAspectRatio as any,
+      minBytes: typeof args.minBytes === "number" ? args.minBytes : undefined,
+      minWidth: typeof args.minWidth === "number" ? args.minWidth : undefined,
+      minHeight: typeof args.minHeight === "number" ? args.minHeight : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+
+  if (name === "refine_image_prompt") {
+    const reviewer = new ImageReviewer();
+    const refined = reviewer.refinePrompt(
+      String(args.prompt ?? ""),
+      typeof args.attempt === "number" ? args.attempt : 1,
+      {
+        topic: typeof args.topic === "string" ? args.topic : undefined,
+        targetAspectRatio: args.targetAspectRatio as any,
+      },
+    );
+    return {
+      content: [{ type: "text", text: JSON.stringify({ refinedPrompt: refined }, null, 2) }],
+    };
+  }
+
+  if (name === "submit_ai_studio_prompt") {
+    const generator = new AiStudioGenerator();
+    const isAvail = await generator.isAvailable();
+    if (!isAvail) {
+      throw new Error("Google AI Studio tab is not open in active browser (Brave/Chrome). Please open aistudio.google.com first.");
+    }
+    await generator.submitPrompt(String(args.prompt ?? ""));
+    return {
+      content: [{ type: "text", text: JSON.stringify({ submitted: true, message: "Prompt submitted to Google AI Studio successfully." }, null, 2) }],
+    };
+  }
+
+  if (name === "open_ai_studio_login") {
+    const cdp = new AiStudioCdpClient();
+    const success = await cdp.ensureBrowser(true);
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          success,
+          message: "Đã mở trình duyệt Google Chrome của dự án đến trang Google AI Studio. Hãy đăng nhập tài khoản Google của bạn một lần duy nhất.",
+          profilePath: join(homedir(), ".openmausbot", "browser", "profiles", "ai-studio"),
+        }, null, 2),
+      }],
     };
   }
 

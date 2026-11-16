@@ -343,6 +343,7 @@ import {
   searchMemoryFiles,
   SESSION_SEARCH_SYSTEM_PROMPT,
   TASK_WORKSPACES_DIR,
+  WORKSPACES_DIR,
   readMemoryOnlyFromRegularFiles,
   workspaceDir,
 } from "./workspace.ts";
@@ -11242,11 +11243,37 @@ function messageFileRootsForThread(senderId: string, threadId: string): string[]
     pinnedCwd = task ? task.pinnedCwd : group.threadId === threadId ? group.pinnedCwd : undefined;
     configuredCwd = group.cwd;
   }
+  const sender = store.bot(senderId);
+  const relevantBot = sender ?? directBot;
+  const peerWorkspaces: string[] = [];
+  if (relevantBot) {
+    const section = relevantBot.section?.trim().toLowerCase();
+    const managed = (relevantBot.managedSections ?? []).map((s) => s.trim().toLowerCase());
+    const peers = new Set(relevantBot.peers ?? []);
+    for (const other of store.bots) {
+      if (other.id === senderId) continue;
+      const otherSection = other.section?.trim().toLowerCase();
+      if (
+        peers.has(other.id) ||
+        (section && otherSection === section) ||
+        (otherSection && managed.includes(otherSection))
+      ) {
+        peerWorkspaces.push(workspaceDir(other.id));
+      }
+    }
+  }
+  const marketingAssetsRoot =
+    process.env.MARKETING_ASSETS_ROOT?.trim() ||
+    process.env.OMB_MARKETING_ASSETS_ROOT?.trim() ||
+    join(WORKSPACES_DIR, "default", "marketing-assets");
+  const defaultWorkspace = workspaceDir("default");
+
   return messageFileRoots({
     senderWorkspace: workspaceDir(senderId),
     attachments: ATTACHMENTS_DIR,
     pinnedCwd,
     configuredCwd,
+    additionalRoots: [defaultWorkspace, marketingAssetsRoot, ...peerWorkspaces],
   });
 }
 

@@ -79,8 +79,9 @@ A safe, reliable two-phase workflow designed for social media and content market
 
 ---
 
-### 🧠 4. Model Diversity & Agent Collaboration
+### 🧠 4. Model Diversity, Team Templates & Agent Collaboration
 - **Per-Bot Engine Configuration**: Assign Claude 3.7 Sonnet to your software architect, Gemini 2.5 Flash to your researcher, and Grok to your social analyst.
+- **Prebuilt Team Templates**: One-click installation for structured multi-agent teams (**Marketing Team**, **Software Dev Team**, **Operations Team**, **Sales & Support Team**) with distinct Chibi mascot shapes, Lead (`chiefOfStaff`) pinning at the top with a crown badge, and one-click **Delete team & bots** management.
 - **Channels & Team Rooms**: Group bots into dedicated project channels where agents collaborate, take turns, and hand off tasks.
 - **Human-in-the-Loop Approvals**: Risky commands, terminal executions, and file modifications prompt interactive Allow/Deny approval cards.
 
@@ -94,31 +95,34 @@ A safe, reliable two-phase workflow designed for social media and content market
 
 ## 🏗️ Architecture
 
-RoMes runs as two lightweight cooperating processes:
+RoMes runs as two lightweight cooperating processes (served behind Caddy HTTPS in production at `romes.io.vn`):
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Frontend Web UI / Desktop App (Port 5199)"]
-        Chat[Chat Interface & Channels]
-        AvatarEngine[Chibi Kinetic Avatar Engine]
-        Studio[Marketing Studio Preview]
+    subgraph UI ["Frontend Web UI / Desktop App (Vite · React 19)"]
+        Chat["Chat Interface, Store & Default RoMes Routing"]
+        AvatarEngine["Chibi Kinetic Avatar Engine (10 Mascot Bodies)"]
+        TeamGallery["Team Templates Gallery & Sidebar Team Menu"]
+        Studio["Marketing Studio & Video Preview"]
     end
 
     subgraph Server ["RoMes Harness Server (Port 8799)"]
-        Router[API & SSE Event Stream]
-        Broker[Permission & Approval Broker]
-        StudioMgr[Marketing Campaign Manager]
-        DriverReg[Agent Driver Registry]
+        Router["API & SSE Event Stream"]
+        TeamStore["Team Import, Bot Order & Chief Pinning (/api/bots, /api/teams)"]
+        Broker["Permission & Approval Broker"]
+        StudioMgr["Marketing Campaign & Video Compiler (Remotion + FFmpeg)"]
+        DriverReg["Agent Driver Registry"]
     end
 
     subgraph Engines ["Agent Runtime & Tools"]
-        CLI[Claude · Codex · Grok · Gemini CLIs]
-        BrowserAuto[Agent-Browser Automation Engine]
-        AIStudio[Google AI Studio Nano Banana 2 Lite]
-        Composio[Composio Connected Apps · 500+ Tools]
+        CLI["Claude · Codex · Grok · Gemini CLIs"]
+        BrowserAuto["Agent-Browser & CDP Automation Engine"]
+        AIStudio["Google AI Studio Nano Banana 2 Lite"]
+        Composio["Composio Connected Apps · 500+ Tools"]
     end
 
     UI <-- "HTTP Commands & SSE Streams" --> Server
+    TeamGallery --> TeamStore
     Server --> DriverReg
     DriverReg --> CLI
     Server --> Broker
@@ -127,6 +131,11 @@ flowchart TD
     DriverReg --> BrowserAuto
     DriverReg --> Composio
 ```
+
+### Key Architectural Modules (Latest)
+- **Team Templates & Role Hierarchy**: `src/lib/team-templates.ts`, `src/components/TeamTemplatesGallery.tsx`, `src/lib/template-add.ts`, `src/components/SidebarTeamMenu.tsx`, `src/components/Sidebar.tsx` — prebuilt multi-agent team manifests, Lead (`chiefOfStaff`) pinning & crown badges, and full team+bot deletion.
+- **State & Entry Routing**: `src/state/store.tsx` — prioritizes `RoMes` on initial hydration and fallback selection.
+- **Marketing & Video Pipeline**: `server/marketing/` (`studio.ts`, `video-compiler.ts`, `remotion/`, `social-scripts/`, `product-images/`) — end-to-end brief, AI Studio image generation/review, Remotion/FFmpeg video compilation, and social publishing.
 
 ---
 

@@ -1,6 +1,18 @@
 import type { MarketingSceneSpec } from "./types.ts";
 
-export type SceneLayout = "hero" | "problem" | "split" | "stats" | "cards" | "showcase" | "quote" | "cta";
+export type SceneLayout =
+  | "hero"
+  | "problem"
+  | "split"
+  | "stats"
+  | "cards"
+  | "showcase"
+  | "quote"
+  | "cta"
+  | "swarm"
+  | "chart"
+  | "telemetry"
+  | "outro";
 
 const LAYOUT_BY_TYPE: Record<MarketingSceneSpec["type"], SceneLayout> = {
   hook: "hero",
@@ -12,9 +24,19 @@ const LAYOUT_BY_TYPE: Record<MarketingSceneSpec["type"], SceneLayout> = {
   solution: "showcase",
   quote: "quote",
   cta: "cta",
+  swarm: "swarm",
+  chart: "chart",
+  telemetry: "telemetry",
+  outro: "outro",
 };
 
-const BODY_LAYOUTS: SceneLayout[] = ["cards", "split", "stats", "showcase", "quote"];
+const BODY_LAYOUTS: SceneLayout[] = [
+  "showcase",
+  "cards",
+  "split",
+  "stats",
+  "quote",
+];
 
 function bulletsOf(scene: MarketingSceneSpec): string[] {
   return (scene.bulletPoints?.length ? scene.bulletPoints : scene.features) ?? [];
@@ -50,7 +72,8 @@ export function resolveSceneLayouts(scenes: MarketingSceneSpec[]): SceneLayout[]
     const wanted = LAYOUT_BY_TYPE[scene.type] ?? "showcase";
     const previous = layouts[index - 1];
     let chosen = wanted;
-    if (wanted === previous && BODY_LAYOUTS.includes(wanted)) {
+    const isGenericBody = scene.type === "features" || scene.type === "product" || scene.type === "solution";
+    if (wanted === previous && BODY_LAYOUTS.includes(wanted) && isGenericBody) {
       const candidates = BODY_LAYOUTS
         .filter((layout) => layout !== previous && fits(layout, scene))
         .sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0)
@@ -72,9 +95,18 @@ export interface StatItem {
 
 export function parseStat(text: string): StatItem | null {
   const [head, ...rest] = text.split(/\s*[|:–—-]\s+/);
-  const match = (head ?? "").match(/^(.*?)(\d+(?:[.,]\d+)?)(.*)$/);
+  const match = (head ?? "").match(/^(.*?)(\d[\d.,]*)(.*)$/);
   if (!match) return null;
-  const value = Number.parseFloat(match[2]!.replace(",", "."));
+  const rawNum = match[2]!;
+  let normalized = rawNum;
+  if (/^\d{1,3}(?:,\d{3})+(\.\d+)?$/.test(rawNum)) {
+    normalized = rawNum.replace(/,/g, "");
+  } else if (/^\d{1,3}(?:\.\d{3})+(,\d+)?$/.test(rawNum)) {
+    normalized = rawNum.replace(/\./g, "").replace(",", ".");
+  } else {
+    normalized = rawNum.replace(",", ".");
+  }
+  const value = Number.parseFloat(normalized);
   if (!Number.isFinite(value)) return null;
   const tail = match[3]!.trim();
   const suffixMatch = tail.match(/^(%|x|\+|k|m|tr|tỷ|lần)(?=\s|$)/i);

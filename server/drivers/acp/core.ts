@@ -606,6 +606,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // Detach before the final events: a listener may start the next turn synchronously.
         session.current = null;
         active.delete(threadId);
+        const turnText = current.state.text;
         current.flushAssistantText();
         let finalOk = ok;
         let finalStopReason = stopReason;
@@ -618,6 +619,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ...base(threadId, current.turnId),
             type: "runtime.error",
             message: `${support.displayName} finished without replying.`,
+          });
+        } else if (finalOk && finalStopReason === null && (/usage limit|individual quota reached|quota reached|resource_exhausted/i.test(turnText) || classifyError({ text: turnText }).reason === "quota")) {
+          finalOk = false; finalStopReason = "quota";
+          emit({
+            ...base(threadId, current.turnId),
+            type: "runtime.error",
+            message: turnText.trim() || `${support.displayName} usage limit reached.`,
+            limit: "engine",
           });
         }
         emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
@@ -1446,11 +1455,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               promptInput = { ...promptTurn, system: "", text: composed.text };
               pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt, previous: previousReceipt };
             }
-            const text = support.buildPromptText
+            const rawText = support.buildPromptText
               ? support.buildPromptText(promptInput)
               : promptInput.system
                 ? `${promptInput.system}\n\n${promptInput.text}`
                 : promptInput.text;
+            const text = typeof rawText === "string" ? rawText.toWellFormed() : rawText;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];

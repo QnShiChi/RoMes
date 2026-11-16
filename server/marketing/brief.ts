@@ -104,9 +104,12 @@ export function assessMarketingBrief(input: MarketingBriefInput): MarketingBrief
       : undefined;
 
   const hasValidImageCount = Number.isFinite(input.imageCount) && input.imageCount! > 0;
-  const imageCount = hasValidImageCount
-    ? Math.min(12, Math.max(1, Math.round(input.imageCount!)))
+  const defaultImageCount = contentType === "video_campaign"
+    ? Math.max(3, Math.round((duration || 30) / 3))
     : 1;
+  const imageCount = hasValidImageCount
+    ? Math.min(30, Math.max(1, Math.round(input.imageCount!)))
+    : defaultImageCount;
 
   const rawCta = clean(input.callToAction);
   const isNegativeCta = Boolean(rawCta && /^(ko|không|khong|none|no|0)$/i.test(rawCta));

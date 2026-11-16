@@ -239,6 +239,62 @@ describe("marketing consultation", () => {
       sources: { imageCount: "proposed_default" },
     });
   });
+
+  it("calculates default image count for video campaign based on ~3s per image pacing", () => {
+    const { imageCount: _img, targetDurationSeconds: _dur, ...baseVideoSources } = videoSources;
+
+    // 30s video -> 10 images
+    const res30 = assessMarketingBrief({
+      contentType: "video_campaign",
+      topic: "Khóa học AI",
+      goal: "Chuyển đổi",
+      audience: "Lập trình viên",
+      platform: "TikTok",
+      style: "Hiện đại",
+      targetDurationSeconds: 30,
+      callToAction: "Đăng ký ngay",
+      fieldSources: { ...baseVideoSources, targetDurationSeconds: "user" },
+    });
+    expect(res30).toMatchObject({
+      complete: true,
+      brief: { imageCount: 10, targetDurationSeconds: 30 },
+      sources: { imageCount: "proposed_default" },
+    });
+
+    // 15s video -> 5 images
+    const res15 = assessMarketingBrief({
+      contentType: "video_campaign",
+      topic: "Khóa học AI",
+      goal: "Chuyển đổi",
+      audience: "Lập trình viên",
+      platform: "TikTok",
+      style: "Hiện đại",
+      targetDurationSeconds: 15,
+      callToAction: "Đăng ký ngay",
+      fieldSources: { ...baseVideoSources, targetDurationSeconds: "user" },
+    });
+    expect(res15).toMatchObject({
+      complete: true,
+      brief: { imageCount: 5, targetDurationSeconds: 15 },
+    });
+
+    // 60s video -> 20 images
+    const res60 = assessMarketingBrief({
+      contentType: "video_campaign",
+      topic: "Khóa học AI",
+      goal: "Chuyển đổi",
+      audience: "Lập trình viên",
+      platform: "TikTok",
+      style: "Hiện đại",
+      targetDurationSeconds: 60,
+      callToAction: "Đăng ký ngay",
+      fieldSources: { ...baseVideoSources, targetDurationSeconds: "user" },
+    });
+    expect(res60).toMatchObject({
+      complete: true,
+      brief: { imageCount: 20, targetDurationSeconds: 60 },
+    });
+  });
 });
 
 describe("marketing intent", () => {

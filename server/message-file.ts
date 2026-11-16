@@ -24,12 +24,14 @@ export function messageFileRoots(options: {
   attachments: string;
   pinnedCwd: string | null | undefined;
   configuredCwd?: string;
+  additionalRoots?: readonly string[];
 }): string[] {
   const conversationRoot = options.pinnedCwd === undefined ? options.configuredCwd : options.pinnedCwd;
   return [...new Set([
     ...(typeof conversationRoot === "string" ? [conversationRoot] : []),
     options.senderWorkspace,
     options.attachments,
+    ...(options.additionalRoots ?? []),
   ])];
 }
 

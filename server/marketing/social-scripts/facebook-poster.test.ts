@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { FacebookPoster } from "./facebook-poster.ts";
+import { FacebookPoster, formatForFacebook } from "./facebook-poster.ts";
 import type { AgentDesktopRunner } from "./agent-desktop-runner.ts";
 
 describe("FacebookPoster", () => {
@@ -49,5 +49,57 @@ describe("FacebookPoster", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/facebook tab not found/i);
+  });
+
+  it("routes to Reel upload workflow when videoPath is provided", async () => {
+    const mockRunner: Partial<AgentDesktopRunner> = {
+      findTab: vi.fn().mockResolvedValue("@tab:fb"),
+      clickRef: vi.fn().mockResolvedValue(undefined),
+      findActionable: vi.fn().mockImplementation(async (query) => {
+        if (query.role === "button" && query.namePattern?.test("Menu")) {
+          return "@btn:menu";
+        }
+        if (query.role === "button" && query.namePattern?.test("Thước phim")) {
+          return "@btn:reel";
+        }
+        if (query.role === "button" && query.namePattern?.test("Tiếp")) {
+          return "@btn:next";
+        }
+        if (query.role === "textbox") {
+          return "@box:reel-desc";
+        }
+        if (query.role === "button" && query.namePattern?.test("Đăng")) {
+          return "@btn:post-reel";
+        }
+        return null;
+      }),
+      fastPaste: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const poster = new FacebookPoster(mockRunner as AgentDesktopRunner);
+    const result = await poster.publish({
+      text: "Video reel ngắn về sản phẩm mới!",
+      images: [],
+      videoPath: "/tmp/test-video.mp4",
+      campaignId: "camp-fb-reel-1",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.platform).toBe("facebook");
+    expect(result.postUrl).toContain("facebook.com/reel");
+    expect(mockRunner.fastPaste).toHaveBeenCalledWith("@box:reel-desc", "Video reel ngắn về sản phẩm mới!");
+    expect(mockRunner.clickRef).toHaveBeenCalledWith("@btn:post-reel");
+  });
+
+  describe("formatForFacebook", () => {
+    it("cleans markdown asterisks and converts bullets to unicode dots while preserving newlines", () => {
+      const markdown = `**1. Cảm giác gõ vượt trội và bảo vệ công thái học (Ergonomics)**\n* **Độ nảy và phản hồi chuẩn xác:** Giảm đau mỏi tay.\n\n#BanPhimCo #Workspace`;
+      const formatted = formatForFacebook(markdown);
+
+      expect(formatted).not.toContain("**");
+      expect(formatted).toContain("1. Cảm giác gõ vượt trội và bảo vệ công thái học (Ergonomics)");
+      expect(formatted).toContain("• Độ nảy và phản hồi chuẩn xác: Giảm đau mỏi tay.");
+      expect(formatted).toContain("\n\n#BanPhimCo #Workspace");
+    });
   });
 });

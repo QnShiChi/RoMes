@@ -24,4 +24,44 @@ describe("ffmpeg-motion", () => {
     expect(right).toContain("(on/120)");
     expect(right).not.toContain("on/d");
   });
+
+  it("renders a beat motion video end-to-end with multiple beats and xfade", async () => {
+    const { mkdtempSync, rmSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { execFileSync } = await import("node:child_process");
+    const { renderBeatMotionVideo } = await import("./ffmpeg-motion.ts");
+
+    const tempDir = mkdtempSync(join(tmpdir(), "motion-test-"));
+    try {
+      const audioPath = join(tempDir, "audio.mp3");
+      execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-c:a", "libmp3lame", audioPath]);
+
+      // Create a dummy video clip
+      const sampleVideo = join(tempDir, "sample.mp4");
+      execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30", "-t", "2", "-c:v", "libx264", sampleVideo]);
+
+      const outputPath = join(tempDir, "final.mp4");
+      const result = await renderBeatMotionVideo({
+        manifest: {
+          campaignSlug: "test-campaign",
+          targetDurationSeconds: 4,
+          styleTheme: "retro_tech_newspaper",
+          beats: [
+            { beatIndex: 1, durationEstimateMs: 2000, narration: "Beat One", visualPrompt: "Scene 1", cameraMotion: "slow_zoom_in", videoPath: sampleVideo },
+            { beatIndex: 2, durationEstimateMs: 2000, narration: "Beat Two", visualPrompt: "Scene 2", cameraMotion: "pan_right" },
+          ],
+        },
+        audioPath,
+        outputPath,
+        width: 720,
+        height: 1280,
+      });
+
+      expect(existsSync(result.videoPath)).toBe(true);
+      expect(result.durationSeconds).toBeGreaterThanOrEqual(3);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -8,8 +8,38 @@ export type ContextualAnimationType =
   | "growth"
   | "default";
 
+export type MarketingSceneType =
+  | "hook"
+  | "problem"
+  | "split"
+  | "stats"
+  | "features"
+  | "product"
+  | "quote"
+  | "solution"
+  | "cta"
+  | "swarm"
+  | "chart"
+  | "telemetry"
+  | "outro";
+
+export interface TelemetryMetric {
+  label: string;
+  value: string | number;
+  delta?: string;
+  status?: "danger" | "warning" | "success" | "info";
+}
+
+export interface SwarmAgentNode {
+  id: string;
+  name: string;
+  role: string;
+  icon?: string;
+  status?: string;
+}
+
 export interface MarketingSceneSpec {
-  type: "hook" | "problem" | "split" | "stats" | "features" | "product" | "quote" | "solution" | "cta";
+  type: MarketingSceneType;
   title: string;
   subtitle?: string;
   features?: string[];
@@ -17,9 +47,13 @@ export interface MarketingSceneSpec {
   subtitles?: string[];
   imageUrl?: string;
   imagePath?: string;
+  videoPath?: string;
   durationMs?: number;
   animationType?: ContextualAnimationType;
   floatingTags?: string[];
+  themeColor?: "red" | "cyan" | "green" | "amber" | "purple";
+  telemetryMetrics?: TelemetryMetric[];
+  swarmNodes?: SwarmAgentNode[];
 }
 
 export interface RemotionVideoProps {

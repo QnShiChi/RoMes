@@ -16,7 +16,7 @@ export interface AddedTemplate {
 export async function addTemplate(manifest: unknown, dispatch: (action: Action) => void): Promise<AddedTemplate> {
   // SAFETY: this endpoint is owned by the app and returns the imported records.
   const response = (await api("/api/teams/import?mode=add", { method: "POST", body: JSON.stringify(manifest) })) as AddedTemplate;
-  for (const bot of response.bots) dispatch({ type: "botAdded", bot });
+  for (const bot of [...response.bots].reverse()) dispatch({ type: "botAdded", bot });
   for (const group of response.groups ?? []) dispatch({ type: "groupPatched", group });
   for (const routine of response.routines ?? []) dispatch({ type: "routinePatched", routine });
   const first = response.bots.find((bot) => !bot.hidden);

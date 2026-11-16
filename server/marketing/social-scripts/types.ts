@@ -32,6 +32,7 @@ export interface SocialPostPayload {
   images: string[];
   campaignId: string;
   options?: Record<string, unknown>;
+  videoPath?: string;
 }
 
 export interface SocialPostResult {

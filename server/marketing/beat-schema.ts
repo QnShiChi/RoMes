@@ -25,6 +25,7 @@ export const narrativeBeatSchema = z.object({
   cameraMotion: cameraMotionSchema.default("slow_zoom_in"),
   keywordHighlight: z.string().optional(),
   imagePath: z.string().optional(),
+  videoPath: z.string().optional(),
 });
 export type NarrativeBeat = z.infer<typeof narrativeBeatSchema>;
 
@@ -59,6 +60,7 @@ export function legacyScenesToBeatManifest(
       cameraMotion: motions[idx % motions.length],
       keywordHighlight: title.split(/\s+/).slice(0, 2).join(" "),
       imagePath: typeof s.imagePath === "string" ? s.imagePath : undefined,
+      videoPath: typeof s.videoPath === "string" ? s.videoPath : undefined,
     };
   });
 

@@ -18,6 +18,10 @@ describe("RoMes marketing swarm team file", () => {
         "mcp:marketing_studio:get_marketing_campaign",
         "mcp:marketing_studio:get_marketing_post",
         "mcp:marketing_studio:generate_marketing_images",
+        "mcp:marketing_studio:review_marketing_image",
+        "mcp:marketing_studio:refine_image_prompt",
+        "mcp:marketing_studio:submit_ai_studio_prompt",
+        "mcp:marketing_studio:open_ai_studio_login",
       ],
     });
     expect(byName.get("Momo")?.tools).toEqual({
@@ -25,6 +29,7 @@ describe("RoMes marketing swarm team file", () => {
         "native:*",
         "mcp:marketing_studio:get_marketing_campaign",
         "mcp:marketing_studio:generate_marketing_video",
+        "mcp:marketing_studio:generate_intelligence_commercial",
       ],
     });
     expect(byName.get("RoMes")?.tools?.allow).not.toContain("mcp:marketing_studio:generate_marketing_video");

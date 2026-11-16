@@ -41,15 +41,23 @@ export class AgentDesktopRunner {
     try {
       const res = await this.executor.run("list-apps", []);
       if (res.ok && res.data) {
-        const data = res.data as { apps: Array<{ name: string }> };
-        const names = data.apps.map((a) => a.name.toLowerCase());
-        if (names.some((n) => n.includes("chrome"))) return "chrome";
-        if (names.some((n) => n.includes("brave"))) return "brave";
+        const data = res.data as { apps: Array<{ name: string; presentation?: string }> };
+        const foreground = data.apps.filter((a) => a.presentation === "foreground");
+        for (const app of foreground) {
+          const name = app.name.toLowerCase();
+          if (name.includes("brave")) return "brave";
+          if (name.includes("chrome") || name.includes("google-chrome")) return "chrome";
+        }
+        for (const app of data.apps) {
+          const name = app.name.toLowerCase();
+          if (name.includes("brave")) return "brave";
+          if (name.includes("chrome") || name.includes("google-chrome")) return "chrome";
+        }
       }
     } catch {
       // fallback
     }
-    return "chrome";
+    return "brave";
   }
 
   async snapshot(app?: string): Promise<SnapshotNode> {

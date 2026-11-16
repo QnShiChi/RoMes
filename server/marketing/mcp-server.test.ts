@@ -72,11 +72,16 @@ describe("marketing studio MCP server", () => {
       "get_marketing_post",
       "generate_marketing_images",
       "generate_marketing_video",
+      "generate_intelligence_commercial",
       "resolve_marketing_artifact",
       "get_marketing_publish_capabilities",
       "publish_marketing_artifact",
       "save_marketing_draft",
       "get_marketing_draft",
+      "review_marketing_image",
+      "refine_image_prompt",
+      "submit_ai_studio_prompt",
+      "open_ai_studio_login",
     ]);
     expect(names).not.toContain("mark_marketing_published");
 
@@ -469,5 +474,32 @@ describe("marketing studio MCP server", () => {
     // Desktop publisher in test environment returns no_configured_publisher gracefully or publishes if configured
     const publishResult = JSON.parse(publishNoArtifact.result.content[0].text);
     expect(publishResult.published === false ? publishResult.reason : "published").toBeDefined();
+
+    // Test refine_image_prompt tool
+    const refineCall = await rpc(8, "tools/call", {
+      name: "refine_image_prompt",
+      arguments: {
+        prompt: "mechanical keyboard on desk",
+        attempt: 1,
+        targetAspectRatio: "9:16",
+      },
+    });
+    const refineResult = JSON.parse(refineCall.result.content[0].text);
+    expect(refineResult.refinedPrompt).toContain("mechanical keyboard on desk");
+    expect(refineResult.refinedPrompt).toContain("Hasselblad");
+    expect(refineResult.refinedPrompt).toContain("9:16");
+
+    // Test review_marketing_image tool
+    const reviewCall = await rpc(9, "tools/call", {
+      name: "review_marketing_image",
+      arguments: {
+        filePath: draftResult.posts[0].imagePaths[0],
+        prompt: "mechanical keyboard on desk",
+        targetAspectRatio: "1:1",
+      },
+    });
+    const reviewResult = JSON.parse(reviewCall.result.content[0].text);
+    expect(typeof reviewResult.score).toBe("number");
+    expect(typeof reviewResult.passed).toBe("boolean");
   }, 30_000);
 });

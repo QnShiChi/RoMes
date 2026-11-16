@@ -14,8 +14,16 @@ export function replyExcerpt(text: string, limit = MAX_REPLY_EXCERPT): string {
     )
     .replace(/\s+/g, " ")
     .trim();
-  if (clean.length <= limit) return clean;
-  return `${clean.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+  if (clean.length <= limit) return clean.toWellFormed();
+  const targetLen = Math.max(0, limit - 1);
+  let safeLen = targetLen;
+  if (safeLen > 0 && safeLen < clean.length) {
+    const code = clean.charCodeAt(safeLen - 1);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      safeLen -= 1;
+    }
+  }
+  return `${clean.slice(0, safeLen).trimEnd()}…`.toWellFormed();
 }
 /** What people's lines are called in a bot's prompt: one name where one person uses the server, or a name per line from
  * its speaker on a Team Cloud, where no one person is the user. */

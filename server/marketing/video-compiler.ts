@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,12 +90,31 @@ export async function renderWithRemotion(
   options?: VideoCompilerOptions,
 ): Promise<VideoRenderOutput> {
   const { selectComposition, renderMedia } = await import("@remotion/renderer");
+  const { copyFileSync } = await import("node:fs");
   const serveUrl = await getRemotionBundle();
+  const publicDir = join(serveUrl, "public");
+  if (!existsSync(publicDir)) {
+    mkdirSync(publicDir, { recursive: true });
+  }
 
-  const resolvedScenes = spec.scenes.map((s) => {
+  const resolvedScenes = spec.scenes.map((s, idx) => {
     const raw = s.imagePath || (s as { imageUrl?: string }).imageUrl;
-    const resolved = raw ? resolveImageSource(raw) : "";
-    const resolvedUrl = resolved || undefined;
+    let resolvedUrl: string | undefined;
+    if (raw) {
+      if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:")) {
+        resolvedUrl = raw;
+      } else if (existsSync(raw)) {
+        const ext = raw.toLowerCase().split(".").pop() || "jpg";
+        const fileName = `campaign-asset-${Date.now()}-${idx}.${ext}`;
+        const destPath = join(publicDir, fileName);
+        try {
+          copyFileSync(raw, destPath);
+          resolvedUrl = `/public/${fileName}`;
+        } catch {
+          resolvedUrl = resolveImageSource(raw) || undefined;
+        }
+      }
+    }
     return {
       ...s,
       imageUrl: resolvedUrl,
@@ -119,15 +138,29 @@ export async function renderWithRemotion(
   const tempVideoPath = join(tempDir, "silent-video.mp4");
 
   try {
+    const hasLinuxGpu =
+      process.platform !== "linux" || existsSync("/dev/nvidia0") || existsSync("/dev/dri/renderD128");
+    const isLowMemory = totalmem() < 4 * 1024 * 1024 * 1024;
     await renderMedia({
       composition,
       serveUrl,
       codec: "h264",
       outputLocation: tempVideoPath,
       inputProps,
-      chromiumOptions: {
-        enableMultiProcessOnLinux: true,
-      },
+      ...(isLowMemory || !hasLinuxGpu ? { concurrency: 1 } : {}),
+      hardwareAcceleration: hasLinuxGpu ? "if-possible" : "disable",
+      chromiumOptions: hasLinuxGpu
+        ? {
+            enableMultiProcessOnLinux: true,
+            args: [
+              "--enable-gpu-rasterization",
+              "--enable-zero-copy",
+              "--ignore-gpu-blocklist",
+            ],
+          }
+        : {
+            args: ["--no-sandbox", "--disable-dev-shm-usage"],
+          },
     });
 
     const ffmpegBin = options?.ffmpegPath || "ffmpeg";
@@ -167,6 +200,18 @@ export async function renderWithRemotion(
   }
 }
 
+function getHardwareVideoEncoder(ffmpegBin = "ffmpeg"): { codec: string; presetArgs: string[] } {
+  try {
+    const encoders = execFileSync(ffmpegBin, ["-encoders"], { encoding: "utf8", timeout: 3000, stdio: "pipe" });
+    if (encoders.includes("h264_nvenc")) {
+      return { codec: "h264_nvenc", presetArgs: ["-preset", "p4"] };
+    }
+  } catch {
+    // fallback
+  }
+  return { codec: "libx264", presetArgs: ["-preset", "veryfast"] };
+}
+
 export async function renderWithHtmlFfmpeg(
   spec: VideoRenderSpec,
   options?: VideoCompilerOptions,
@@ -177,6 +222,7 @@ export async function renderWithHtmlFfmpeg(
   const ffmpegBin = options?.ffmpegPath || "ffmpeg";
 
   const tempDir = mkdtempSync(join(tmpdir(), "romes-video-render-"));
+  const encoder = getHardwareVideoEncoder(ffmpegBin);
 
   try {
     const concatEntries: string[] = [];
@@ -234,9 +280,8 @@ export async function renderWithHtmlFfmpeg(
           "-vf",
           vfFilter,
           "-c:v",
-          "libx264",
-          "-preset",
-          "veryfast",
+          encoder.codec,
+          ...encoder.presetArgs,
           "-r",
           fps.toString(),
           mp4Path,

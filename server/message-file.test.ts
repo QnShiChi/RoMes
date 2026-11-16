@@ -62,7 +62,8 @@ describe("message-linked files", () => {
       attachments: "/app/attachments",
       pinnedCwd: undefined,
       configuredCwd: "/current/project",
-    })[0]).toBe("/current/project");
+      additionalRoots: ["/app/default", "/app/marketing-assets"],
+    })).toEqual(["/current/project", "/app/workspace", "/app/attachments", "/app/default", "/app/marketing-assets"]);
   });
 
   it("matches Unix, Windows, and UNC links independently of the server OS", () => {

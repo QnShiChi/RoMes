@@ -35,18 +35,20 @@ Style: Kinetic,Arial,58,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  const lines = cues.map((cue) => {
-    let formattedText = cue.text.trim();
-    if (cue.keywordHighlight && formattedText.includes(cue.keywordHighlight)) {
-      formattedText = formattedText.replaceAll(
-        cue.keywordHighlight,
-        `{\\c&H00E5FF&}${cue.keywordHighlight}{\\r}`,
-      );
-    }
-    const start = formatAssTimestamp(cue.startMs);
-    const end = formatAssTimestamp(cue.endMs);
-    return `Dialogue: 0,${start},${end},Kinetic,,0,0,0,,${formattedText}`;
-  });
+  const lines = cues
+    .filter((cue) => (cue.text || "").trim().length > 0)
+    .map((cue) => {
+      let formattedText = (cue.text || "").trim();
+      if (cue.keywordHighlight && formattedText.includes(cue.keywordHighlight)) {
+        formattedText = formattedText.replaceAll(
+          cue.keywordHighlight,
+          `{\\c&H00E5FF&}${cue.keywordHighlight}{\\r}`,
+        );
+      }
+      const start = formatAssTimestamp(cue.startMs);
+      const end = formatAssTimestamp(cue.endMs);
+      return `Dialogue: 0,${start},${end},Kinetic,,0,0,0,,${formattedText}`;
+    });
 
   return `${header}${lines.join("\n")}\n`;
 }

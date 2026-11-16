@@ -24,6 +24,7 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
 
   it("adds the identity flags after the engine's own, so they win, keeps the user agent whole, and keeps Chrome off the keychain", () => {
     expect(launcherFlags(settings, "darwin")).toEqual([
+      "--no-sandbox", "--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--enable-zero-copy",
       "--disable-blink-features=AutomationControlled", `--user-agent=${UA}`, "--screen-info={1512x982}", "--lang=en-IN", "--use-mock-keychain",
     ]);
     expect(launcherFlags(settings, "linux").at(-1)).toBe("--password-store=basic");
@@ -56,7 +57,7 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
       "#!/bin/sh",
       "TZ='Asia/Kolkata'",
       "export TZ",
-      `exec '/opt/it'\\''s/chrome' "$@" '--disable-blink-features=AutomationControlled' '--user-agent=${UA}' '--screen-info={1512x982}' '--lang=en-IN' '--password-store=basic'`,
+      `exec '/opt/it'\\''s/chrome' "$@" '--no-sandbox' '--ignore-gpu-blocklist' '--enable-gpu-rasterization' '--enable-zero-copy' '--disable-blink-features=AutomationControlled' '--user-agent=${UA}' '--screen-info={1512x982}' '--lang=en-IN' '--password-store=basic'`,
       "",
     ]);
   });
@@ -66,7 +67,7 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
     const script = launcherScript({ chrome: "C:\\Users\\Ada 100%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe", userAgent: windowsUa, screen: { width: 1536, height: 864 }, timeZone: "UTC" }, "win32");
     expect(script).toBe([
       "@echo off",
-      `"C:\\Users\\Ada 100%%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" %* "--disable-blink-features=AutomationControlled" "--user-agent=${windowsUa}" "--screen-info={1536x864}"`,
+      `"C:\\Users\\Ada 100%%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" %* "--no-sandbox" "--ignore-gpu-blocklist" "--enable-gpu-rasterization" "--enable-zero-copy" "--disable-blink-features=AutomationControlled" "--user-agent=${windowsUa}" "--screen-info={1536x864}"`,
       "",
     ].join("\r\n"));
     expect(launcherPath("C:\\data", "win32")).toMatch(/chrome-launcher\.cmd$/u);

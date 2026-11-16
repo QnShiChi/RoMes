@@ -18,7 +18,12 @@ export type MarketingSceneType =
   | "features"
   | "product"
   | "quote"
-  | "cta";
+  | "solution"
+  | "cta"
+  | "swarm"
+  | "chart"
+  | "telemetry"
+  | "outro";
 
 export interface MarketingSceneSpec {
   type: MarketingSceneType;
@@ -157,14 +162,9 @@ export function buildMarketingSceneHtml(
     }
   }
 
-  const subtitlesOverlay = (scene.subtitles || [])
-    .map((s) => `<div class="subtitle-line">${escapeHtml(s)}</div>`)
-    .join("");
-
   return `
     <div class="scene-inner ${isPortrait ? "portrait" : "landscape"}" data-type="${scene.type}">
       ${sceneBody}
-      ${subtitlesOverlay ? `<div class="subtitles-container">${subtitlesOverlay}</div>` : ""}
     </div>
   `;
 }
